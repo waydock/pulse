@@ -190,8 +190,9 @@ interface Store {
 **v1 adapter — `RedisStore`** (Upstash REST via `@upstash/redis`, OR any `redis://` via ioredis,
 so self-hosters aren't locked to Upstash):
 - `node:<id>` → JSON snapshot matching `NodeRecord`: `{ id, lastSeen, alerted, agents, metrics }`.
-- `nodes:lastseen` → ZSET scored by `lastSeen` → `findOverdue` = `ZRANGEBYSCORE … -inf <cutoff>`
-  then `MGET` the snapshots (so each returned record carries its `alerted` flag).
+- `nodes:lastseen` → ZSET scored by `lastSeen` → `findOverdue` = `ZRANGEBYSCORE … -inf (<cutoff>`
+  (exclusive upper bound, matching strict `lastSeen < cutoffTs`) then `MGET` the snapshots (so each
+  returned record carries its `alerted` flag).
 - `node:<id>:samples` → capped LIST (`LPUSH` + `LTRIM`) of recent metric samples — optional in
   v1, enables a sparkline later.
 
