@@ -95,7 +95,8 @@ also makes the receiver survive redeploys with zero state loss.
 Commands:
 - `pulse init` — scaffold a `pulse.config.yaml`.
 - `pulse start` — run the watch loop (the daemon).
-- `pulse check` — run all checks once and print results (for testing config).
+- `pulse check` — run all checks once and print results. **Read-only:** never restarts, never
+  POSTs (no webhook, no heartbeat) — safe for testing config.
 
 Watch loop (every `interval`, default 60s):
 1. **Check** each agent. Three unified check types — all are "run it, exit/return determines up":
@@ -105,7 +106,10 @@ Watch loop (every `interval`, default 60s):
 2. **Anti-flap:** an agent is declared `down` only after `confirm` consecutive failed checks
    (default 2). Prevents one transient miss from paging you.
 3. **Restart:** on confirmed down, run the agent's `restart` command up to `retries` times with
-   linear backoff. Record the outcome.
+   linear backoff (base 10s: attempt _n_ waits _n_×10s, re-checking after each). Record the
+   outcome. If all `retries` are exhausted and still down, fire a single "restart failed" alert
+   and leave the agent in `down` state; the next loop does not re-attempt until the agent recovers
+   on its own or the next confirmed down→down→... cycle (no infinite restart storm).
 4. **Local alert:** on a state transition (up→down, down→up) or restart outcome, POST to
    `webhook.url`. Discord-formatted if the URL is a Discord webhook, else generic JSON.
 5. **Heartbeat:** collect metrics, POST `HeartbeatPayload` to `heartbeat.url` with the bearer
@@ -121,21 +125,37 @@ not generated, in v1.
 ### 4.3 Receiver (Next.js on Vercel)
 Routes:
 - `POST /api/heartbeat` — `Authorization: Bearer <INGEST_TOKEN>`; zod-validate body;
-  `Store.recordHeartbeat(payload)`.
+  `Store.recordHeartbeat(payload)`. **Owns recovery alerts:** this route holds the fresh
+  heartbeat, so if `recordHeartbeat` returns `{ recovered: true }` (the node was flagged
+  `alerted` and is now reporting again), the route clears the flag and fires the recovery
+  webhook ("🟢 `<node>` back"). The route therefore needs the notifier / `ALERT_WEBHOOK_URL`.
 - `GET /api/status` — token-protected JSON: every node + computed liveness + latest metrics.
-- `GET /` — ONE server-rendered, read-only status page (the dashboard seed): nodes, last-seen,
-  CPU/mem, per-agent status dots. Gated by a simple shared password (env), since metrics may be
-  sensitive.
-- `GET /api/cron/sweep` — protected by Vercel's `CRON_SECRET`. The dead-man's-switch:
-  `Store.findOverdue(now − threshold)` → mark down → fire webhook ("🔴 `<node>` went silent") →
-  set `alerted` flag. On the node's return, clear the flag and fire recovery ("🟢 `<node>` back").
+- `GET /` — ONE **server-rendered**, read-only status page (the dashboard seed): nodes,
+  last-seen, CPU/mem, per-agent status dots. Reads via the Store server-side; the read token is
+  used server-side and **never reaches the browser**. Gated by a simple shared password (env),
+  since metrics may be sensitive.
+- `GET /api/cron/sweep` — protected by Vercel's `CRON_SECRET`. **Owns "went silent" alerts only:**
+  `Store.findOverdue(now − missThreshold)` returns overdue `NodeRecord`s (each carries its
+  `alerted` flag); for each one **not already `alerted`**, fire the silence webhook
+  ("🔴 `<node>` went silent") and `markAlerted(id, true)`. Already-alerted nodes are skipped, so a
+  persistently dead node pages exactly once. (Recovery is fired by the ingest route above, not
+  here — a recovered node is no longer overdue, so the sweep can't see it.)
 
-`vercel.json` cron: `{ "path": "/api/cron/sweep", "schedule": "* * * * *" }` (per-minute, Vercel Pro).
+`vercel.json` cron: `{ "path": "/api/cron/sweep", "schedule": "* * * * *" }`.
 
-**Liveness rule:** a node is `down` when `now − lastSeen > missThreshold` (default `3 × interval`
-= 180s). Sweep runs every 60s. The sweep computes "overdue" purely from timestamps, so it is
-**idempotent and self-correcting** — a skipped tick is caught by the next one. This makes the
-scheduler a swappable detail (Vercel Cron now; QStash is a one-line drop-in later).
+**Scheduler is load-bearing — flagged for self-hosters:** per-minute cron requires **Vercel Pro**.
+On Vercel Free/Hobby, cron runs only once/day, which silently breaks the dead-man's-switch. So the
+self-hosting docs MUST (a) state the Pro requirement, and (b) give a fallback for non-Pro
+self-hosters: point an external 1-minute scheduler (**Upstash QStash**, or a plain `cron` /
+systemd timer doing `curl …/api/cron/sweep` with the `CRON_SECRET`) at the same route. The sweep
+route is a plain authenticated HTTP endpoint precisely so any scheduler works.
+
+**Liveness rule:** `missThreshold` is a **receiver-side constant/env** (default 180s), independent
+of any node's configured `interval` — the per-node interval is not sent over the wire, so the
+receiver does not compute `3 × interval` per node; 180s is chosen to tolerate ~3 missed 60s beats.
+A node is `down` when `now − lastSeen > missThreshold`. Sweep runs every 60s and computes "overdue"
+purely from timestamps, so it is **idempotent and self-correcting** — a skipped tick is caught by
+the next one, which is what makes the scheduler swappable.
 
 ---
 
@@ -145,20 +165,33 @@ The receiver talks to a `Store` interface, never to Redis directly. This is the 
 Redis stay the hot layer permanently once Postgres is added for history.
 
 ```ts
+// NodeRecord is the receiver's per-node state (defined in @waydock/pulse-core).
+// `alerted` is what lets the sweep page exactly once; `recordHeartbeat` reads the
+// prior alerted state to decide whether this beat is a recovery.
+type NodeRecord = {
+  id: string            // = HeartbeatPayload.node
+  lastSeen: number      // Unix SECONDS (= the heartbeat's ts)
+  alerted: boolean      // true once a "went silent" alert has fired, until recovery
+  agents: AgentStatus[] // latest per-agent status (display only)
+  metrics: Metrics      // latest snapshot
+}
+
 interface Store {
+  // Upserts the node, updates lastSeen/ZSET. Returns recovered:true iff the node
+  // was previously `alerted` (i.e. this beat ends a silence) and clears the flag.
   recordHeartbeat(p: HeartbeatPayload): Promise<{ recovered: boolean }>
   getNode(id: string): Promise<NodeRecord | null>
   listNodes(): Promise<NodeRecord[]>
-  findOverdue(cutoffTs: number): Promise<NodeRecord[]>
+  findOverdue(cutoffTs: number): Promise<NodeRecord[]>  // lastSeen < cutoffTs; includes alerted flag
   markAlerted(id: string, alerted: boolean): Promise<void>
 }
 ```
 
 **v1 adapter — `RedisStore`** (Upstash REST via `@upstash/redis`, OR any `redis://` via ioredis,
 so self-hosters aren't locked to Upstash):
-- `node:<id>` → JSON snapshot: `{ lastSeen, alerted, agents[], metrics }`.
+- `node:<id>` → JSON snapshot matching `NodeRecord`: `{ id, lastSeen, alerted, agents, metrics }`.
 - `nodes:lastseen` → ZSET scored by `lastSeen` → `findOverdue` = `ZRANGEBYSCORE … -inf <cutoff>`
-  in one call.
+  then `MGET` the snapshots (so each returned record carries its `alerted` flag).
 - `node:<id>:samples` → capped LIST (`LPUSH` + `LTRIM`) of recent metric samples — optional in
   v1, enables a sparkline later.
 
@@ -172,8 +205,9 @@ state from Redis). The agent and the API routes never change.
 
 - **Agent → agent-level events** (via its local `webhook.url`): agent up↔down transitions and
   restart outcomes. Fast, on-box.
-- **Receiver → host-level events** (via its `ALERT_WEBHOOK_URL`): node went silent (missed
-  heartbeats), node recovered.
+- **Receiver → host-level events** (via its `ALERT_WEBHOOK_URL`): "went silent" is fired by the
+  **sweep** (once per silence, guarded by the `alerted` flag); "recovered" is fired by the
+  **ingest route** when a flagged node heartbeats again (`recordHeartbeat` → `recovered: true`).
 
 These are disjoint by construction. A fully dead box can't self-report → the receiver catches the
 silence. A crashed agent on a live box is reported by the agent's local webhook. The agent-status
@@ -221,6 +255,10 @@ metrics: { cpu: true, mem: true, disk: true }
   "metrics": { "cpu": 12.3, "mem": 48.1, "disk": 62.0, "load1": 1.2, "uptime": 86400 }
 }
 ```
+`ts` is **Unix seconds** (pinned in the `@waydock/pulse-core` zod schema). The receiver stores it
+verbatim as `NodeRecord.lastSeen` and all liveness math (`now − lastSeen > missThreshold`, the ZSET
+score) is in seconds — agent and receiver must not drift to milliseconds.
+
 v1 metrics = fixed built-in set: cpu/mem/disk %, load1, host uptime, plus per-agent status &
 restart count.
 
