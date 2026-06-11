@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url'
+import { commands } from './commands.js'
 
 export type CommandOpts = { config: string }
 
@@ -34,12 +35,7 @@ export async function run(argv: string[], handlers: Handlers): Promise<void> {
   await handlers[cmd](opts)
 }
 
-export const defaultHandlers: Handlers = {
-  init: async () => { throw new Error('init not implemented yet') },
-  check: async () => { throw new Error('check not implemented yet') },
-  start: async () => { throw new Error('start not implemented yet') },
-  login: async () => { throw new Error('login not implemented yet') },
-}
+export const defaultHandlers: Handlers = commands
 
 export async function main(): Promise<void> {
   await run(process.argv.slice(2), defaultHandlers)
