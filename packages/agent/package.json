@@ -1,0 +1,16 @@
+{
+  "name": "@waydock/pulse",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "pulse": "./dist/cli.js" },
+  "main": "./dist/index.js",
+  "files": ["dist"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run" },
+  "dependencies": {
+    "@waydock/pulse-core": "*",
+    "js-yaml": "^4.1.0",
+    "systeminformation": "^5.23.0"
+  },
+  "devDependencies": { "@types/js-yaml": "^4.0.9", "@types/node": "^22.0.0" },
+  "publishConfig": { "access": "public" }
+}
