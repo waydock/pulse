@@ -33,6 +33,7 @@ export const Config = z.object({
   webhook: z.object({ url: z.string().url() }).optional(),
   defaults: Defaults,
   agents: z.array(AgentConfig).min(1),
-  metrics: z.object({ cpu: z.boolean(), mem: z.boolean(), disk: z.boolean() }).partial().default({ cpu: true, mem: true, disk: true }),
+  // per-key defaults so `metrics: { cpu: false }` still yields mem/disk = true (not undefined)
+  metrics: z.object({ cpu: z.boolean().default(true), mem: z.boolean().default(true), disk: z.boolean().default(true) }).default({}),
 })
 export type Config = z.infer<typeof Config>
