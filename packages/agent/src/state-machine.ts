@@ -40,4 +40,12 @@ export class AgentState {
       this.status = 'restarting'
     }
   }
+
+  /**
+   * Seed the state machine with a previously-persisted status (e.g. on restart).
+   * Sets status directly without emitting any transition. Leaves `fails` at 0.
+   */
+  seed(status: AgentStatus): void {
+    this.status = status
+  }
 }

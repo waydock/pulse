@@ -40,4 +40,17 @@ describe('login', () => {
     await expect(login({ base: 'b', hostname: 'h', credentialsPath: creds, deps: { fetch, openBrowser: vi.fn(async()=>{}), sleep: vi.fn(async()=>{}), log: vi.fn() } }))
       .rejects.toThrow(/denied/i)
   })
+  it('rejects with /expired/i when expires_in elapses with authorization_pending', async () => {
+    // Device code expires in 1 second (1000 ms). The now() fn advances by
+    // 600 ms each call so after two poll iterations the deadline is exceeded.
+    let tick = 0
+    const start = 1_000_000
+    const nowFn = () => start + tick++ * 600
+    // fetch always returns authorization_pending (never resolves)
+    const pendingResp = { device_code: 'dc', user_code: 'AAAA-BBBB', verification_uri: 'https://x', verification_uri_complete: 'https://x?code=AAAA-BBBB', expires_in: 1, interval: 1 }
+    const fetch = fakeFetch([pendingResp, { error: 'authorization_pending' }, { error: 'authorization_pending' }, { error: 'authorization_pending' }])
+    await expect(
+      login({ base: 'b', hostname: 'h', credentialsPath: creds, deps: { fetch, openBrowser: vi.fn(async()=>{}), sleep: vi.fn(async()=>{}), log: vi.fn(), now: nowFn } })
+    ).rejects.toThrow(/expired/i)
+  })
 })

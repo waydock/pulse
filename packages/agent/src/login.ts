@@ -8,6 +8,8 @@ export interface LoginDeps {
   openBrowser?: (url: string) => Promise<void>
   sleep?: (ms: number) => Promise<void>
   log?: (...a: any[]) => void
+  /** Injectable clock for testability; returns milliseconds (like Date.now). */
+  now?: () => number
 }
 
 function defaultOpenBrowser(url: string): Promise<void> {
@@ -38,6 +40,7 @@ export async function login(opts: {
     openBrowser = defaultOpenBrowser,
     sleep = defaultSleep,
     log = console.log,
+    now = Date.now,
   } = opts.deps ?? {}
 
   // Step 1: request device code
@@ -55,7 +58,7 @@ export async function login(opts: {
     interval: number
   }
 
-  const { device_code, user_code, verification_uri, verification_uri_complete, interval } = deviceData
+  const { device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval } = deviceData
 
   // Step 2: display user code and open browser
   log(`\nTo authorize this machine, visit ${verification_uri} and enter:\n\n    ${user_code}\n`)
@@ -66,10 +69,14 @@ export async function login(opts: {
   }
 
   // Step 3: poll for token
+  const deadline = now() + expires_in * 1000
   let intervalMs = interval * 1000
   let token: string | undefined
 
   while (true) {
+    if (now() >= deadline) {
+      throw new Error('device code expired')
+    }
     const pollResp = await fetchFn(`${base}/oauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

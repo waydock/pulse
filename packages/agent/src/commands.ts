@@ -57,7 +57,7 @@ async function start(opts: { config: string }): Promise<void> {
   }
 
   process.stdout.write(`Starting Pulse watch on node "${config.node}"...\n`)
-  const stop = startWatch(config)
+  const stop = await startWatch(config)
 
   // Handle graceful shutdown
   const shutdown = () => {

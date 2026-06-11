@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { AgentState } from './state-machine.js'
 import { evaluateAgent } from './checks.js'
 import { startHeartbeatLoop, buildHeartbeat, sendHeartbeat, defaultMetrics } from './heartbeat.js'
@@ -5,6 +7,9 @@ import type { AlertEvent } from './webhook.js'
 import type { RestartOutcome } from './restart.js'
 import type { ResolvedConfig } from './config-loader.js'
 import type { AgentStatus } from '@waydock/pulse-core'
+
+/** Default on-disk path for persisted agent state. */
+export const DEFAULT_STATE_PATH = join(homedir(), '.pulse', 'state.json')
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +34,8 @@ export interface CheckTickDeps {
   }) => Promise<{ outcome: RestartOutcome; attempts: number }>
   /** Persist agent statuses to disk. */
   writeState: (path: string, state: Record<string, string>) => Promise<void>
+  /** Path to the state file on disk. */
+  statePath: string
   /** Current time in seconds. */
   now: () => number
 }
@@ -102,7 +109,7 @@ export async function runCheckTick(
   for (const [name, info] of ctx.statuses) {
     stateObj[name] = info.status
   }
-  await deps.writeState('.pulse-state.json', stateObj)
+  await deps.writeState(deps.statePath, stateObj)
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +120,10 @@ export interface StartWatchDeps {
   /** Override setInterval (for tests). */
   setIntervalFn?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
   clearIntervalFn?: (id: ReturnType<typeof setInterval>) => void
+  /** Path to the on-disk state file; defaults to DEFAULT_STATE_PATH. */
+  statePath?: string
+  /** Override readState (for tests). */
+  readState?: (path: string) => Promise<Record<string, string>>
 }
 
 /**
@@ -122,10 +133,31 @@ export interface StartWatchDeps {
  *
  * Returns a stop() function that stops both loops.
  */
-export function startWatch(config: ResolvedConfig, deps: StartWatchDeps = {}): () => void {
+export async function startWatch(config: ResolvedConfig, deps: StartWatchDeps = {}): Promise<() => void> {
+  const statePath = deps.statePath ?? DEFAULT_STATE_PATH
+
+  // Read persisted state before starting loops so a restart does not re-fire
+  // alerts for agents that were already known-down before the restart.
+  const readStateFn = deps.readState ?? (async (p) => {
+    const { readState } = await import('./state-file.js')
+    return readState(p)
+  })
+  const persisted = await readStateFn(statePath)
+
   const ctx: WatchCtx = {
     states: new Map(),
     statuses: new Map(),
+  }
+
+  // Seed state machines and statuses from persisted data
+  for (const agent of config.agents) {
+    const persistedStatus = persisted[agent.name] as ('up' | 'down') | undefined
+    if (persistedStatus === 'down') {
+      const state = new AgentState(agent.confirm)
+      state.seed('down')
+      ctx.states.set(agent.name, state)
+      ctx.statuses.set(agent.name, { status: 'down', restarts: 0 })
+    }
   }
 
   // --- Check/restart loop ---
@@ -158,6 +190,7 @@ export function startWatch(config: ResolvedConfig, deps: StartWatchDeps = {}): (
       const { writeState } = await import('./state-file.js')
       await writeState(path, state)
     },
+    statePath,
     now: () => Date.now() / 1000,
   }
 

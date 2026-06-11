@@ -1,3 +1,4 @@
+import { loadavg } from 'node:os'
 import type { AgentStatus, HeartbeatPayload, Metrics } from '@waydock/pulse-core'
 
 export type { AgentStatus, HeartbeatPayload, Metrics }
@@ -90,11 +91,10 @@ export function startHeartbeatLoop(opts: HeartbeatLoopOpts): () => void {
 export async function defaultMetrics(): Promise<Metrics> {
   // Dynamic import keeps systeminformation out of test bundles that inject fakes.
   const si = await import('systeminformation')
-  const [cpu, mem, fsSize, load, time] = await Promise.all([
+  const [cpu, mem, fsSize, time] = await Promise.all([
     si.currentLoad(),
     si.mem(),
     si.fsSize(),
-    si.currentLoad(),   // load1 comes from os.loadavg via si.currentLoad
     si.time(),
   ])
 
@@ -107,7 +107,7 @@ export async function defaultMetrics(): Promise<Metrics> {
     cpu: Math.round(cpu.currentLoad * 10) / 10,
     mem: Math.round(((mem.total - mem.available) / mem.total) * 1000) / 10,
     disk: Math.round(diskPct * 10) / 10,
-    load1: load.avgLoad ?? 0,
+    load1: loadavg()[0],
     uptime: time.uptime ?? 0,
   }
 }

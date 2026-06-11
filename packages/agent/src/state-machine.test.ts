@@ -45,3 +45,29 @@ describe('AgentState (confirm=2)', () => {
     expect(s.status).toBe('down')         // restart attempt failed -> back to down, not a new transition
   })
 })
+
+describe('AgentState.seed()', () => {
+  it('seed("down") sets status to down without emitting any transition', () => {
+    const s = new AgentState(2)
+    s.seed('down')
+    expect(s.status).toBe('down')
+  })
+  it('after seed("down"), a passed check returns down->up (not up->down)', () => {
+    const s = new AgentState(2)
+    s.seed('down')
+    expect(s.onCheck(true)).toBe('down->up')
+    expect(s.status).toBe('up')
+  })
+  it('after seed("down"), a failed check returns null (already down — no duplicate alert)', () => {
+    const s = new AgentState(2)
+    s.seed('down')
+    expect(s.onCheck(false)).toBeNull()
+    expect(s.status).toBe('down')
+  })
+  it('seed("up") leaves status up and a single fail does not immediately fire up->down', () => {
+    const s = new AgentState(2)
+    s.seed('up')
+    expect(s.status).toBe('up')
+    expect(s.onCheck(false)).toBeNull()   // confirm=2, only 1 fail
+  })
+})
