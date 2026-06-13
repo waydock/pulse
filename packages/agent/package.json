@@ -1,0 +1,38 @@
+{
+  "name": "@waydock/pulse",
+  "version": "0.1.0",
+  "description": "Open-source watcher CLI: checks your processes, restarts them when they die, and sends heartbeats and alerts.",
+  "keywords": [
+    "monitoring",
+    "watcher",
+    "heartbeat",
+    "uptime",
+    "process",
+    "healthcheck",
+    "cli",
+    "restart"
+  ],
+  "license": "MIT",
+  "author": "Waydock",
+  "homepage": "https://github.com/smd00/waydock-pulse#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smd00/waydock-pulse.git",
+    "directory": "packages/agent"
+  },
+  "bugs": { "url": "https://github.com/smd00/waydock-pulse/issues" },
+  "type": "module",
+  "bin": { "pulse": "./dist/cli.js" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run" },
+  "dependencies": {
+    "@waydock/pulse-core": "^0.1.0",
+    "js-yaml": "^4.1.0",
+    "systeminformation": "^5.23.0"
+  },
+  "devDependencies": { "@types/js-yaml": "^4.0.9", "@types/node": "^22.0.0" },
+  "publishConfig": { "access": "public" }
+}
