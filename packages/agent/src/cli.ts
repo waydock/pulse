@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { commands } from './commands.js'
 
@@ -41,6 +42,19 @@ export async function main(): Promise<void> {
   await run(process.argv.slice(2), defaultHandlers)
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// True when this module is the process entry point. npm installs the CLI as a
+// symlink (.bin/pulse -> dist/cli.js), so process.argv[1] is the symlink path
+// while import.meta.url is the realpath; resolve the link before comparing, or
+// main() never runs when invoked as the installed `pulse` binary.
+export function isMainEntry(importMetaUrl: string, entry: string | undefined): boolean {
+  if (!entry) return false
+  try {
+    return importMetaUrl === pathToFileURL(realpathSync(entry)).href
+  } catch {
+    return false
+  }
+}
+
+if (isMainEntry(import.meta.url, process.argv[1])) {
   main().catch(e => { console.error(e.message); process.exit(1) })
 }
