@@ -5,13 +5,13 @@
   "keywords": ["monitoring", "heartbeat", "schema", "zod", "types"],
   "license": "MIT",
   "author": "Waydock",
-  "homepage": "https://github.com/smd00/waydock-pulse#readme",
+  "homepage": "https://github.com/waydock/waydock-pulse#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/smd00/waydock-pulse.git",
+    "url": "git+https://github.com/waydock/waydock-pulse.git",
     "directory": "packages/core"
   },
-  "bugs": { "url": "https://github.com/smd00/waydock-pulse/issues" },
+  "bugs": { "url": "https://github.com/waydock/waydock-pulse/issues" },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
