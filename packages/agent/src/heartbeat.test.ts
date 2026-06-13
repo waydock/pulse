@@ -1,9 +1,21 @@
-import { describe, it, expect, vi } from 'vitest'
-import { buildHeartbeat, sendHeartbeat, startHeartbeatLoop } from './heartbeat.js'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+const siMocks = vi.hoisted(() => ({
+  currentLoad: vi.fn(async () => ({ currentLoad: 12.34 })),
+  mem: vi.fn(async () => ({ total: 100, available: 60 })),
+  fsSize: vi.fn(async () => [{ size: 100, used: 25 }]),
+  time: vi.fn(async () => ({ uptime: 100 })),
+}))
+vi.mock('systeminformation', () => siMocks)
+
+import { buildHeartbeat, defaultMetrics, sendHeartbeat, startHeartbeatLoop } from './heartbeat.js'
 import { HeartbeatPayload } from '@waydock/pulse-core'
 
 const metrics = async () => ({ cpu: 12, mem: 40, disk: 60, load1: 1, uptime: 100 })
 const agents = () => [{ name: 'hermes', status: 'up' as const, restarts: 0 }]
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 describe('buildHeartbeat', () => {
   it('builds a payload that satisfies the core schema, with interval + ts', async () => {
@@ -26,6 +38,17 @@ describe('sendHeartbeat', () => {
     const fetch = vi.fn(async () => { throw new Error('x') }) as any
     const p = await buildHeartbeat({ node: 'n1', interval: 60, agents, metrics, now: () => 1 })
     await expect(sendHeartbeat('u', 'k', p, { fetch })).resolves.toBeUndefined()
+  })
+})
+describe('defaultMetrics', () => {
+  it('skips disabled metric collectors and reports zero values for them', async () => {
+    const result = await defaultMetrics({ cpu: false, mem: false, disk: false })
+
+    expect(siMocks.currentLoad).not.toHaveBeenCalled()
+    expect(siMocks.mem).not.toHaveBeenCalled()
+    expect(siMocks.fsSize).not.toHaveBeenCalled()
+    expect(siMocks.time).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ cpu: 0, mem: 0, disk: 0, uptime: 100 })
   })
 })
 describe('startHeartbeatLoop', () => {

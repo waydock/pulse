@@ -68,6 +68,7 @@ export async function runCheckTick(
 
     const ts = deps.now()
     const baseEvent = { node: config.node, agent: agent.name, ts }
+    let restartAttempts = 0
 
     if (transition === 'up->down') {
       // Fire 'down' alert
@@ -77,11 +78,12 @@ export async function runCheckTick(
       const restartCmd = agent.restart
       if (restartCmd !== false && restartCmd !== undefined) {
         state.markRestarting()
-        const { outcome } = await deps.attemptRestart({
+        const { outcome, attempts } = await deps.attemptRestart({
           name: agent.name,
           restart: restartCmd,
           retries: agent.retries,
         })
+        restartAttempts = attempts
 
         if (outcome === 'recovered') {
           // The recheck inside attemptRestart succeeded, so update state machine
@@ -100,7 +102,7 @@ export async function runCheckTick(
     const currentRestarts = ctx.statuses.get(agent.name)?.restarts ?? 0
     ctx.statuses.set(agent.name, {
       status: state.status === 'restarting' ? 'down' : state.status,
-      restarts: currentRestarts,
+      restarts: currentRestarts + restartAttempts,
     })
   }
 
@@ -197,35 +199,45 @@ export async function startWatch(config: ResolvedConfig, deps: StartWatchDeps = 
   const setFn = deps.setIntervalFn ?? setInterval
   const clearFn = deps.clearIntervalFn ?? clearInterval
 
-  const checkId = setFn(() => {
+  const runCheck = () =>
     runCheckTick(config, ctx, checkTickDeps).catch(() => {
       /* swallow — check loop must never crash the process */
     })
-  }, checkIntervalMs)
+
+  const heartbeatTick = async (): Promise<void> => {
+    const agentStatuses = (): AgentStatus[] =>
+      config.agents.map(a => {
+        const info = ctx.statuses.get(a.name)
+        return {
+          name: a.name,
+          status: info?.status ?? 'up',
+          restarts: info?.restarts ?? 0,
+        }
+      })
+
+    const payload = await buildHeartbeat({
+      node: config.node,
+      interval: config.heartbeat.interval,
+      agents: agentStatuses,
+      metrics: () => defaultMetrics(config.metrics),
+    })
+
+    await sendHeartbeat(config.heartbeat.url, config.heartbeat.key ?? '', payload)
+  }
+
+  // Run one check + heartbeat immediately so a down agent is caught (and the
+  // first beat sent) without waiting a full interval. `setInterval` only fires
+  // after the first interval has elapsed.
+  await runCheck()
+  await heartbeatTick().catch(() => { /* swallow — heartbeat must never crash */ })
+
+  // --- Check/restart loop ---
+  const checkId = setFn(runCheck, checkIntervalMs)
 
   // --- Heartbeat loop ---
   const stopHeartbeat = startHeartbeatLoop({
     intervalMs: checkIntervalMs,
-    tick: async () => {
-      const agentStatuses = (): AgentStatus[] =>
-        config.agents.map(a => {
-          const info = ctx.statuses.get(a.name)
-          return {
-            name: a.name,
-            status: info?.status ?? 'up',
-            restarts: info?.restarts ?? 0,
-          }
-        })
-
-      const payload = await buildHeartbeat({
-        node: config.node,
-        interval: config.heartbeat.interval,
-        agents: agentStatuses,
-        metrics: defaultMetrics,
-      })
-
-      await sendHeartbeat(config.heartbeat.url, config.heartbeat.key ?? '', payload)
-    },
+    tick: heartbeatTick,
     setIntervalFn: deps.setIntervalFn,
     clearIntervalFn: deps.clearIntervalFn,
   })

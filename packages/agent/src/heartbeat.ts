@@ -3,6 +3,12 @@ import type { AgentStatus, HeartbeatPayload, Metrics } from '@waydock/pulse-core
 
 export type { AgentStatus, HeartbeatPayload, Metrics }
 
+export type MetricFlags = {
+  cpu?: boolean
+  mem?: boolean
+  disk?: boolean
+}
+
 // ---------------------------------------------------------------------------
 // buildHeartbeat
 // ---------------------------------------------------------------------------
@@ -88,13 +94,19 @@ export function startHeartbeatLoop(opts: HeartbeatLoopOpts): () => void {
 // defaultMetrics — thin systeminformation wrapper for production use
 // ---------------------------------------------------------------------------
 
-export async function defaultMetrics(): Promise<Metrics> {
+export async function defaultMetrics(flags: MetricFlags = {}): Promise<Metrics> {
+  const enabled = {
+    cpu: flags.cpu ?? true,
+    mem: flags.mem ?? true,
+    disk: flags.disk ?? true,
+  }
+
   // Dynamic import keeps systeminformation out of test bundles that inject fakes.
   const si = await import('systeminformation')
   const [cpu, mem, fsSize, time] = await Promise.all([
-    si.currentLoad(),
-    si.mem(),
-    si.fsSize(),
+    enabled.cpu ? si.currentLoad() : undefined,
+    enabled.mem ? si.mem() : undefined,
+    enabled.disk ? si.fsSize() : undefined,
     si.time(),
   ])
 
@@ -104,8 +116,8 @@ export async function defaultMetrics(): Promise<Metrics> {
     : 0
 
   return {
-    cpu: Math.round(cpu.currentLoad * 10) / 10,
-    mem: Math.round(((mem.total - mem.available) / mem.total) * 1000) / 10,
+    cpu: cpu ? Math.round(cpu.currentLoad * 10) / 10 : 0,
+    mem: mem ? Math.round(((mem.total - mem.available) / mem.total) * 1000) / 10 : 0,
     disk: Math.round(diskPct * 10) / 10,
     load1: loadavg()[0],
     uptime: time.uptime ?? 0,

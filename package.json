@@ -4,7 +4,7 @@
   "workspaces": ["packages/*"],
   "engines": { "node": ">=20" },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "tsc -b",
     "test": "vitest run",
     "typecheck": "tsc -b"
   },

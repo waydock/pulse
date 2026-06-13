@@ -67,6 +67,7 @@ describe('runCheckTick (integration)', () => {
     // the agent is down (command:false) and confirm=1, so first tick -> up->down -> restart attempt + alerts
     expect(webhookCalls.some(c => c.kind === 'down')).toBe(true)
     expect(webhookCalls.some(c => c.kind === 'restart-failed')).toBe(true)
+    expect(ctx.statuses.get('down-one')?.restarts).toBe(1)
   })
 
   it('heartbeats reach a fake receiver (the heartbeat path works end to end)', async () => {
@@ -114,5 +115,6 @@ describe('runCheckTick (integration)', () => {
     expect(webhookCalls.some(c => c.kind === 'down')).toBe(true)
     expect(webhookCalls.some(c => c.kind === 'restart-recovered')).toBe(true)
     expect(exec).toHaveBeenCalledTimes(2)  // two exec calls before successful recheck
+    expect(ctx.statuses.get('recover-me')?.restarts).toBe(2)
   })
 })
