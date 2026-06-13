@@ -1,6 +1,6 @@
 {
   "name": "@waydock/pulse-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared types and config/heartbeat schema (zod) for @waydock/pulse.",
   "keywords": ["monitoring", "heartbeat", "schema", "zod", "types"],
   "license": "MIT",
