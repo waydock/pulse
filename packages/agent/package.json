@@ -14,13 +14,13 @@
   ],
   "license": "MIT",
   "author": "Waydock",
-  "homepage": "https://github.com/smd00/waydock-pulse#readme",
+  "homepage": "https://github.com/waydock/waydock-pulse#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/smd00/waydock-pulse.git",
+    "url": "git+https://github.com/waydock/waydock-pulse.git",
     "directory": "packages/agent"
   },
-  "bugs": { "url": "https://github.com/smd00/waydock-pulse/issues" },
+  "bugs": { "url": "https://github.com/waydock/waydock-pulse/issues" },
   "type": "module",
   "bin": { "pulse": "./dist/cli.js" },
   "main": "./dist/index.js",
