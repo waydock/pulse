@@ -53,6 +53,8 @@ jobs:
               echo "✓ $name@$version already published — skipping"
             else
               echo "→ publishing $name@$version"
-              ( cd "$dir" && npm publish )
+              # --provenance attaches a signed SLSA build attestation (needs the
+              # id-token: write permission above + a public repo).
+              ( cd "$dir" && npm publish --provenance )
             fi
           done
