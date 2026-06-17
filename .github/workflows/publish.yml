@@ -1,0 +1,58 @@
+name: Publish
+
+# Publishes the workspace packages to npm using npm Trusted Publishing (OIDC) —
+# no NPM_TOKEN secret. Each package's version is published only if it isn't
+# already on the registry, so a single `vX.Y.Z` tag publishes whatever changed
+# and re-runs are safe.
+#
+# npm setup (one-time, per package, at npmjs.com → package → Settings →
+# Trusted Publisher):
+#   Publisher:          GitHub Actions
+#   Organization/user:  waydock
+#   Repository:         waydock-pulse
+#   Workflow filename:  publish.yml
+# Configure it for BOTH @waydock/pulse and @waydock/pulse-core.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write   # required for npm OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      # OIDC trusted publishing needs npm >= 11.5.1; runners ship 10.x.
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm test
+
+      - name: Publish changed packages
+        run: |
+          set -euo pipefail
+          # core before agent (agent depends on @waydock/pulse-core).
+          for dir in packages/core packages/agent; do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "✓ $name@$version already published — skipping"
+            else
+              echo "→ publishing $name@$version"
+              ( cd "$dir" && npm publish )
+            fi
+          done
