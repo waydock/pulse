@@ -25,19 +25,20 @@ describe('buildHeartbeat', () => {
   })
 })
 describe('sendHeartbeat', () => {
-  it('POSTs with bearer auth and JSON body', async () => {
-    const fetch = vi.fn(async () => ({ ok: true })) as any
+  it('POSTs with bearer auth and JSON body, and reports delivery', async () => {
+    const fetch = vi.fn(async () => ({ ok: true, status: 200 })) as any
     const p = await buildHeartbeat({ node: 'n1', interval: 60, agents, metrics, now: () => 1 })
-    await sendHeartbeat('https://ingest.example/h', 'KEY123', p, { fetch })
+    const res = await sendHeartbeat('https://ingest.example/h', 'KEY123', p, { fetch })
     const [url, opts] = fetch.mock.calls[0]
     expect(url).toBe('https://ingest.example/h')
     expect(opts.headers['Authorization']).toBe('Bearer KEY123')
     expect(JSON.parse(opts.body).node).toBe('n1')
+    expect(res).toEqual({ ok: true, status: 200 })
   })
-  it('never throws on network failure', async () => {
+  it('never throws on network failure, and reports non-delivery', async () => {
     const fetch = vi.fn(async () => { throw new Error('x') }) as any
     const p = await buildHeartbeat({ node: 'n1', interval: 60, agents, metrics, now: () => 1 })
-    await expect(sendHeartbeat('u', 'k', p, { fetch })).resolves.toBeUndefined()
+    await expect(sendHeartbeat('u', 'k', p, { fetch })).resolves.toEqual({ ok: false })
   })
 })
 describe('defaultMetrics', () => {

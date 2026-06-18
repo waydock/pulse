@@ -41,15 +41,21 @@ export interface SendHeartbeatDeps {
   fetch?: typeof globalThis.fetch
 }
 
+/** Delivery outcome — never throws; reports whether the beat reached the server. */
+export interface HeartbeatResult {
+  ok: boolean
+  status?: number
+}
+
 export async function sendHeartbeat(
   url: string,
   key: string,
   payload: HeartbeatPayload,
   deps: SendHeartbeatDeps = {},
-): Promise<void> {
+): Promise<HeartbeatResult> {
   const fetchFn = deps.fetch ?? globalThis.fetch
   try {
-    await fetchFn(url, {
+    const res = await fetchFn(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${key}`,
@@ -58,8 +64,10 @@ export async function sendHeartbeat(
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(8000),
     })
+    return { ok: res.ok, status: res.status }
   } catch {
-    // best-effort: swallow all network / timeout errors
+    // best-effort: swallow all network / timeout errors, but report non-delivery.
+    return { ok: false }
   }
 }
 
