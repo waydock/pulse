@@ -71,7 +71,7 @@ export async function login(opts: {
   // Step 3: poll for token
   const deadline = now() + expires_in * 1000
   let intervalMs = interval * 1000
-  let token: string | undefined
+  let accessToken: string | undefined
 
   while (true) {
     if (now() >= deadline) {
@@ -86,10 +86,11 @@ export async function login(opts: {
         client_id: 'pulse-cli',
       }),
     })
-    const pollData = await pollResp.json() as { token?: string; error?: string }
+    // RFC 8628 §3.5 / RFC 6749 §5.1: a successful grant returns `access_token`.
+    const pollData = await pollResp.json() as { access_token?: string; error?: string }
 
-    if (pollData.token) {
-      token = pollData.token
+    if (pollData.access_token) {
+      accessToken = pollData.access_token
       break
     }
 
@@ -106,7 +107,7 @@ export async function login(opts: {
   }
 
   // Step 4: write credentials with mode 0600
-  const json = JSON.stringify({ key: token }, null, 2)
+  const json = JSON.stringify({ key: accessToken }, null, 2)
   await mkdir(dirname(credentialsPath), { recursive: true })
   await writeFile(credentialsPath, json, { mode: 0o600 })
   // chmod explicitly in case umask masked the mode on create

@@ -17,7 +17,7 @@ const deviceCodeResp = { device_code: 'dc_123', user_code: 'WXYZ-PQRS', verifica
 
 describe('login', () => {
   it('requests a code, polls past authorization_pending, then stores the key (0600)', async () => {
-    const fetch = fakeFetch([deviceCodeResp, { error: 'authorization_pending' }, { token: 'pk_live_xyz' }])
+    const fetch = fakeFetch([deviceCodeResp, { error: 'authorization_pending' }, { access_token: 'pk_live_xyz' }])
     const openBrowser = vi.fn(async () => {})
     const log = vi.fn()
     await login({ base: 'https://ingest.waydock.ai/api/pulse', hostname: 'mac-mini', credentialsPath: creds,
@@ -29,11 +29,21 @@ describe('login', () => {
   })
   it('honors slow_down by increasing the interval', async () => {
     const sleep = vi.fn(async () => {})
-    const fetch = fakeFetch([deviceCodeResp, { error: 'slow_down' }, { token: 'pk' }])
+    const fetch = fakeFetch([deviceCodeResp, { error: 'slow_down' }, { access_token: 'pk' }])
     await login({ base: 'b', hostname: 'h', credentialsPath: creds, deps: { fetch, openBrowser: vi.fn(async()=>{}), sleep, log: vi.fn() } })
     // first poll wait = interval (1s = 1000ms); after slow_down, +5s -> 6000ms
     const waits = sleep.mock.calls.map((c: any[]) => c[0])
     expect(waits).toContain(6000)
+  })
+  it('does not honor a legacy `token`-only response (standard access_token required)', async () => {
+    // The server speaks RFC 8628 `access_token`; the old `token` alias is gone.
+    // A response carrying only `token` must NOT be treated as success — it looks
+    // like neither a grant nor a known pending error, so login fails instead of
+    // writing a credential from the wrong field.
+    const fetch = fakeFetch([deviceCodeResp, { token: 'legacy-alias' }])
+    await expect(
+      login({ base: 'b', hostname: 'h', credentialsPath: creds, deps: { fetch, openBrowser: vi.fn(async()=>{}), sleep: vi.fn(async()=>{}), log: vi.fn() } })
+    ).rejects.toThrow(/device authorization failed/i)
   })
   it('throws on access_denied', async () => {
     const fetch = fakeFetch([deviceCodeResp, { error: 'access_denied' }])
