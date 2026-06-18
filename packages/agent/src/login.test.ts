@@ -27,6 +27,25 @@ describe('login', () => {
     expect(openBrowser).toHaveBeenCalledWith(deviceCodeResp.verification_uri_complete)
     if (process.platform !== 'win32') expect(statSync(creds).mode & 0o777).toBe(0o600)
   })
+  it('sends form-urlencoded requests per RFC 8628 (not JSON)', async () => {
+    const fetch = fakeFetch([deviceCodeResp, { access_token: 'pk' }])
+    await login({ base: 'b', hostname: 'mac-mini', credentialsPath: creds,
+                  deps: { fetch, openBrowser: vi.fn(async()=>{}), sleep: vi.fn(async()=>{}), log: vi.fn() } })
+    // Both the device-code and token requests must be form-encoded.
+    for (const [, opts] of fetch.mock.calls) {
+      expect(opts.headers['Content-Type']).toBe('application/x-www-form-urlencoded')
+      expect(typeof opts.body).toBe('string')
+      expect(opts.body).not.toContain('{')   // not JSON
+    }
+    // Device-code request carries client_id + hostname as form params.
+    const deviceParams = new URLSearchParams(fetch.mock.calls[0][1].body)
+    expect(deviceParams.get('client_id')).toBe('pulse-cli')
+    expect(deviceParams.get('hostname')).toBe('mac-mini')
+    // Token request carries the device_code grant.
+    const tokenParams = new URLSearchParams(fetch.mock.calls[1][1].body)
+    expect(tokenParams.get('grant_type')).toBe('urn:ietf:params:oauth:grant-type:device_code')
+    expect(tokenParams.get('device_code')).toBe('dc_123')
+  })
   it('honors slow_down by increasing the interval', async () => {
     const sleep = vi.fn(async () => {})
     const fetch = fakeFetch([deviceCodeResp, { error: 'slow_down' }, { access_token: 'pk' }])
