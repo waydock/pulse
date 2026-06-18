@@ -44,10 +44,12 @@ export async function login(opts: {
   } = opts.deps ?? {}
 
   // Step 1: request device code
+  // RFC 8628 §3.1: the device authorization request is form-urlencoded.
+  // `hostname` is a custom extension param the ingest server uses to name the node.
   const deviceResp = await fetchFn(`${base}/oauth/device/code`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: 'pulse-cli', hostname }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: 'pulse-cli', hostname }).toString(),
   })
   const deviceData = await deviceResp.json() as {
     device_code: string
@@ -77,14 +79,15 @@ export async function login(opts: {
     if (now() >= deadline) {
       throw new Error('device code expired')
     }
+    // RFC 8628 §3.4: the device access token request is form-urlencoded.
     const pollResp = await fetchFn(`${base}/oauth/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         device_code,
         client_id: 'pulse-cli',
-      }),
+      }).toString(),
     })
     // RFC 8628 §3.5 / RFC 6749 §5.1: a successful grant returns `access_token`.
     const pollData = await pollResp.json() as { access_token?: string; error?: string }
