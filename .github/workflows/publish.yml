@@ -53,8 +53,10 @@ jobs:
               echo "✓ $name@$version already published — skipping"
             else
               echo "→ publishing $name@$version"
-              # --provenance attaches a signed SLSA build attestation (needs the
-              # id-token: write permission above + a public repo).
-              ( cd "$dir" && npm publish --provenance )
+              # NOTE: --provenance is intentionally omitted — npm rejects
+              # provenance from a PRIVATE source repo (E422 "Only public source
+              # repositories are supported"). Re-add `--provenance` here if
+              # waydock/waydock-pulse is ever made public.
+              ( cd "$dir" && npm publish )
             fi
           done
