@@ -1,6 +1,6 @@
 {
   "name": "@waydock/pulse",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Open-source watcher CLI: checks your processes, restarts them when they die, and sends heartbeats and alerts.",
   "keywords": [
     "monitoring",
