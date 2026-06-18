@@ -13,16 +13,32 @@ export const DEFAULT_INGEST_BASE = `${INGEST_ORIGIN}/api/pulse` // login posts t
 export const DEFAULT_HEARTBEAT_URL = `${DEFAULT_INGEST_BASE}/heartbeat`
 
 // ---------------------------------------------------------------------------
+// Load the config or exit. A missing file is the common first-run case, so point
+// the user at `pulse init` instead of surfacing a raw ENOENT.
+// ---------------------------------------------------------------------------
+export async function loadConfigOrExit(
+  configPath: string,
+): Promise<Awaited<ReturnType<typeof loadConfig>>> {
+  try {
+    return await loadConfig(configPath)
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') {
+      process.stderr.write(
+        `No config file found at ${configPath}.\n` +
+        'Run `pulse init` to create one, then edit it and try again.\n',
+      )
+    } else {
+      process.stderr.write(`Error loading config: ${err.message}\n`)
+    }
+    process.exit(1)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // check — read-only: evaluate all agents and print a table, no restart, no POST
 // ---------------------------------------------------------------------------
 async function check(opts: { config: string }): Promise<void> {
-  let config
-  try {
-    config = await loadConfig(opts.config)
-  } catch (err: any) {
-    process.stderr.write(`Error loading config: ${err.message}\n`)
-    process.exit(1)
-  }
+  const config = await loadConfigOrExit(opts.config)
 
   const results = await Promise.all(
     config.agents.map(async agent => ({
@@ -44,13 +60,7 @@ async function check(opts: { config: string }): Promise<void> {
 // start — load config, validate key, then startWatch
 // ---------------------------------------------------------------------------
 async function start(opts: { config: string }): Promise<void> {
-  let config
-  try {
-    config = await loadConfig(opts.config)
-  } catch (err: any) {
-    process.stderr.write(`Error loading config: ${err.message}\n`)
-    process.exit(1)
-  }
+  const config = await loadConfigOrExit(opts.config)
 
   if (!config.heartbeat.key) {
     process.stderr.write(
@@ -134,7 +144,13 @@ async function loginCmd(opts: { config: string }): Promise<void> {
       base: DEFAULT_INGEST_BASE,
       hostname: osHostname(),
     })
-    process.stdout.write('Logged in successfully. You can now run `pulse start`.\n')
+    process.stdout.write(
+      'Logged in successfully.\n\n' +
+      'Next steps:\n' +
+      '  pulse init     create pulse.config.yaml (skip if you already have one)\n' +
+      '  pulse start    run the watcher\n\n' +
+      'Tip: if you ran this via npx, prefix each command — e.g. `npx @waydock/pulse start`.\n',
+    )
   } catch (err: any) {
     process.stderr.write(`Login failed: ${err.message}\n`)
     process.exit(1)
