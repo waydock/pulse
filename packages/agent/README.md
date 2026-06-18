@@ -28,7 +28,7 @@ All commands accept `--config <path>` (default: `./pulse.config.yaml`).
 node: my-server            # unique name for this machine
 
 heartbeat:
-  url: https://ingest.waydock.ai/v1/heartbeat
+  url: https://ingest.waydock.ai/api/pulse/heartbeat
   # key is loaded from ~/.pulse/credentials.json after `pulse login`
   interval: 60             # seconds between heartbeats (also the check interval)
 
