@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { runCheckTick } from './watch.js'
+import { runCheckTick, startWatch } from './watch.js'
 import { attemptRestart } from './restart.js'
 
 async function fakeReceiver(): Promise<{ url: string; beats: any[]; close: () => void }> {
@@ -81,6 +81,31 @@ describe('runCheckTick (integration)', () => {
       expect(recv.beats).toHaveLength(1)
       expect(recv.beats[0]).toMatchObject({ node: 'n1', interval: 60 })
     } finally { recv.close() }
+  })
+
+  it('startWatch reports each beat via onHeartbeat with delivery + up/down counts', async () => {
+    const origFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200 })) as any
+    const beats: { ok: boolean; up: number; down: number }[] = []
+    try {
+      const config: any = {
+        node: 'n1', heartbeat: { url: 'http://127.0.0.1:1/h', key: 'k', interval: 60 },
+        defaults: { retries: 1, confirm: 1, interval: 60 },
+        agents: [{ name: 'a', checks: [{ command: 'true' }], restart: false, retries: 1, confirm: 1 }],
+        metrics: {},
+      }
+      const stop = await startWatch(config, {
+        setIntervalFn: () => 0 as any,   // don't schedule repeats; just the immediate beat
+        clearIntervalFn: () => {},
+        readState: async () => ({}),
+        onHeartbeat: info => beats.push(info),
+      })
+      stop()
+      expect(beats).toHaveLength(1)                        // the immediate first beat
+      expect(beats[0]).toEqual({ ok: true, up: 1, down: 0 }) // `command: true` → up
+    } finally {
+      globalThis.fetch = origFetch
+    }
   })
 
   it('real attemptRestart wired with fake exec+recheck recovers on attempt 2 and fires restart-recovered', async () => {

@@ -59,7 +59,7 @@ async function check(opts: { config: string }): Promise<void> {
 // ---------------------------------------------------------------------------
 // start — load config, validate key, then startWatch
 // ---------------------------------------------------------------------------
-async function start(opts: { config: string }): Promise<void> {
+async function start(opts: { config: string; quiet?: boolean }): Promise<void> {
   const config = await loadConfigOrExit(opts.config)
 
   if (!config.heartbeat.key) {
@@ -69,8 +69,27 @@ async function start(opts: { config: string }): Promise<void> {
     process.exit(1)
   }
 
-  process.stdout.write(`Starting Pulse watch on node "${config.node}"...\n`)
-  const stop = await startWatch(config)
+  // Startup summary so the foreground watcher doesn't look frozen: what it's
+  // watching, how often it beats, where to, and how to stop it.
+  let host: string
+  try { host = new URL(config.heartbeat.url).host } catch { host = config.heartbeat.url }
+  const n = config.agents.length
+  process.stdout.write(
+    `Starting Pulse watch on node "${config.node}" — ` +
+    `${n} agent${n === 1 ? '' : 's'}, heartbeat every ${config.heartbeat.interval}s → ${host}.\n` +
+    'Running in the foreground; press Ctrl+C to stop' +
+    (opts.quiet ? '.\n' : ' (use --quiet to silence per-beat status).\n'),
+  )
+
+  // Per-beat status line so you can see it's alive — suppressed with --quiet.
+  const stop = await startWatch(config, {
+    onHeartbeat: opts.quiet ? undefined : ({ ok, up, down }) => {
+      const t = new Date().toTimeString().slice(0, 8)
+      process.stdout.write(
+        `[${t}] heartbeat ${ok ? 'ok' : 'FAILED'} · ${up} up${down ? ` · ${down} down` : ''}\n`,
+      )
+    },
+  })
 
   // Handle graceful shutdown
   const shutdown = () => {

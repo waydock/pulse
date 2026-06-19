@@ -126,6 +126,8 @@ export interface StartWatchDeps {
   statePath?: string
   /** Override readState (for tests). */
   readState?: (path: string) => Promise<Record<string, string>>
+  /** Called after every heartbeat with the delivery result + live up/down counts. */
+  onHeartbeat?: (info: { ok: boolean; up: number; down: number }) => void
 }
 
 /**
@@ -215,14 +217,20 @@ export async function startWatch(config: ResolvedConfig, deps: StartWatchDeps = 
         }
       })
 
+    const statuses = agentStatuses()
     const payload = await buildHeartbeat({
       node: config.node,
       interval: config.heartbeat.interval,
-      agents: agentStatuses,
+      agents: () => statuses,
       metrics: () => defaultMetrics(config.metrics),
     })
 
-    await sendHeartbeat(config.heartbeat.url, config.heartbeat.key ?? '', payload)
+    const result = await sendHeartbeat(config.heartbeat.url, config.heartbeat.key ?? '', payload)
+
+    if (deps.onHeartbeat) {
+      const up = statuses.filter(s => s.status === 'up').length
+      deps.onHeartbeat({ ok: result.ok, up, down: statuses.length - up })
+    }
   }
 
   // Run one check + heartbeat immediately so a down agent is caught (and the
