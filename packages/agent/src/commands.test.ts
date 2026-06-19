@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
-import { DEFAULT_INGEST_BASE, DEFAULT_HEARTBEAT_URL, STARTER_CONFIG, loadConfigOrExit } from './commands.js'
+import { DEFAULT_INGEST_BASE, DEFAULT_HEARTBEAT_URL, STARTER_CONFIG, loadConfigOrExit, shouldRunWizard } from './commands.js'
 
 // Regression guard: the live ingest server serves every Pulse route under
 // /api/pulse. Earlier the CLI targeted /oauth/* and /v1/heartbeat, which 404'd,
@@ -26,6 +26,22 @@ describe('ingest endpoint constants', () => {
   it('never falls back to the old, 404-ing paths', () => {
     expect(STARTER_CONFIG).not.toContain('/v1/heartbeat')
     expect(DEFAULT_INGEST_BASE).not.toMatch(/waydock\.ai$/) // must not be the bare origin
+  })
+})
+
+describe('shouldRunWizard', () => {
+  it('runs the wizard on an interactive TTY with no flags', () => {
+    expect(shouldRunWizard({}, { stdin: true, stdout: true })).toBe(true)
+  })
+  it('stays with the static template when stdout is piped/redirected', () => {
+    expect(shouldRunWizard({}, { stdin: true, stdout: false })).toBe(false)
+    expect(shouldRunWizard({}, { stdin: false, stdout: false })).toBe(false)
+  })
+  it('lets --yes force the static template even on a TTY', () => {
+    expect(shouldRunWizard({ yes: true }, { stdin: true, stdout: true })).toBe(false)
+  })
+  it('lets --interactive force the wizard even when not a TTY', () => {
+    expect(shouldRunWizard({ interactive: true }, { stdin: false, stdout: false })).toBe(true)
   })
 })
 

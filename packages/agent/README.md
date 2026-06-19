@@ -12,13 +12,30 @@ Requires Node.js >= 20.
 ## Quick start
 
 ```bash
-pulse init      # write a starter pulse.config.yaml
+pulse init      # set up pulse.config.yaml (guided wizard in a terminal)
 pulse login     # authenticate this machine (device flow) -> ~/.pulse/credentials.json
 pulse check     # evaluate all agents once and print a status table (no restarts, no network)
 pulse start     # run the watch + heartbeat loops in the foreground
 ```
 
 All commands accept `--config <path>` (default: `./pulse.config.yaml`).
+
+### `pulse init`
+
+Run in an interactive terminal, `pulse init` walks you through a few questions
+(what to watch, how to health-check it, how to restart it) and writes a
+ready-to-run config — no need to learn the YAML up front. It validates your
+answers against the config schema before writing, and asks before overwriting an
+existing file.
+
+| Flag | Behaviour |
+| --- | --- |
+| _(none, on a TTY)_ | Guided wizard |
+| `-i`, `--interactive` | Force the wizard (e.g. through a pipe) |
+| `-y`, `--yes` | Skip the wizard and write the static starter template |
+
+When stdin/stdout isn't a terminal (CI, pipes, `pulse init > file`), it writes the
+static template automatically, so scripts and Dockerfiles keep working.
 
 ## Configuration
 
