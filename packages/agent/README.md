@@ -7,7 +7,8 @@ when they die, persists state across restarts, and sends heartbeats and alerts.
 npm install -g @waydock/pulse
 ```
 
-Requires Node.js >= 20.
+Requires Node.js >= 20. Supported on **macOS and Linux** (checks and restarts
+rely on `ps` / `/bin/sh`); Windows is not supported yet.
 
 ## Quick start
 
@@ -25,13 +26,13 @@ All commands accept `--config <path>` (default: `./pulse.config.yaml`).
 
 | Command | What it does |
 | --- | --- |
-| `init` | Guided setup wizard (autodetects running services; chains into login + a verifying heartbeat). `--yes` writes the static template. |
+| `init` | Guided setup wizard (autodetects running services; chains into login → a verifying heartbeat → an optional `install`). `--yes` writes the static template. |
 | `login` / `logout` | Authenticate this machine / remove stored credentials. |
 | `whoami` | Show auth status, a masked key fingerprint, and where this node reports. |
 | `check` | Evaluate all agents once. `--json` emits machine-readable output for CI/cron. |
 | `start` | Run the watch + heartbeat loops in the foreground. `--quiet` silences the per-beat status line. |
 | `doctor` | Preflight diagnostics: Node version, config, auth, ingest reachability, agent status, restart binaries on PATH. |
-| `install` / `uninstall` | Register/remove Pulse as a background service — launchd (macOS) or a systemd **user** unit (Linux). |
+| `install` / `uninstall` | Register/remove Pulse as a background service — launchd (macOS) or a systemd **user** unit (Linux); on Linux it auto-enables `loginctl` lingering so it starts on boot. |
 | `upgrade` | Reinstall the latest published version (`npm i -g @waydock/pulse@latest`). |
 | `version` | Print the CLI version (`pulse --version` / `-v`). |
 

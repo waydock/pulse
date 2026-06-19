@@ -6,6 +6,7 @@ import { evaluateAgent } from './checks.js'
 import { startWatch } from './watch.js'
 import { login } from './login.js'
 import { runSetup } from './setup.js'
+import { assertSupportedPlatform } from './platform.js'
 import type { Handlers, CommandOpts } from './cli.js'
 
 // All Pulse endpoints are served under /api/pulse on the ingest host.
@@ -39,6 +40,7 @@ export async function loadConfigOrExit(
 // check — read-only: evaluate all agents and print a table, no restart, no POST
 // ---------------------------------------------------------------------------
 async function check(opts: { config: string; json?: boolean }): Promise<void> {
+  assertSupportedPlatform()
   const config = await loadConfigOrExit(opts.config)
 
   const results = await Promise.all(
@@ -66,6 +68,7 @@ async function check(opts: { config: string; json?: boolean }): Promise<void> {
 // start — load config, validate key, then startWatch
 // ---------------------------------------------------------------------------
 async function start(opts: { config: string; quiet?: boolean }): Promise<void> {
+  assertSupportedPlatform()
   const config = await loadConfigOrExit(opts.config)
 
   if (!config.heartbeat.key) {
@@ -148,6 +151,7 @@ export function shouldRunWizard(
 }
 
 async function init(opts: CommandOpts): Promise<void> {
+  assertSupportedPlatform()
   if (shouldRunWizard(opts, { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY })) {
     return runSetup({ config: opts.config })
   }
@@ -217,6 +221,7 @@ async function whoamiCmd(opts: CommandOpts): Promise<void> {
 // doctor — preflight diagnostics
 // ---------------------------------------------------------------------------
 async function doctorCmd(opts: CommandOpts): Promise<void> {
+  assertSupportedPlatform()
   const { runDoctor, formatReport } = await import('./doctor.js')
   const report = await runDoctor({ configPath: opts.config })
   process.stdout.write(formatReport(report))
@@ -227,50 +232,16 @@ async function doctorCmd(opts: CommandOpts): Promise<void> {
 // install / uninstall — register Pulse as a background service
 // ---------------------------------------------------------------------------
 async function installCmd(opts: CommandOpts): Promise<void> {
-  const { planService } = await import('./service.js')
-  const plan = planService(opts.config)
-  if (plan.platform === 'unsupported') {
-    process.stderr.write(plan.detail + '\n')
-    process.exit(1)
-  }
-
-  const { mkdir, writeFile } = await import('node:fs/promises')
-  const { dirname } = await import('node:path')
-  await mkdir(dirname(plan.path), { recursive: true })
-  await writeFile(plan.path, plan.content, 'utf8')
-  process.stdout.write(`Wrote ${plan.manager} service to ${plan.path}\n`)
-
-  await runShell(plan.install)
-  if (plan.note) process.stdout.write(`\nNote: ${plan.note}\n`)
-  process.stdout.write(`\nPulse is now running as a service. Logs: ~/.pulse/pulse.log\nStop it with \`pulse uninstall\`.\n`)
+  const { performInstall } = await import('./service.js')
+  const result = await performInstall(opts.config)
+  for (const m of result.messages) process.stdout.write(m + '\n')
+  if (!result.installed) process.exit(1)
 }
 
 async function uninstallCmd(opts: CommandOpts): Promise<void> {
-  const { planService } = await import('./service.js')
-  const plan = planService(opts.config)
-  if (plan.platform === 'unsupported') {
-    process.stderr.write(plan.detail + '\n')
-    process.exit(1)
-  }
-
-  await runShell(plan.uninstall)
-  const { rm } = await import('node:fs/promises')
-  await rm(plan.path, { force: true })
-  process.stdout.write(`Removed ${plan.manager} service (${plan.path}).\n`)
-}
-
-/** Run a sequence of shell commands, surfacing failures but never throwing. */
-async function runShell(cmds: string[]): Promise<void> {
-  const { exec } = await import('node:child_process')
-  const { promisify } = await import('node:util')
-  const run = promisify(exec)
-  for (const cmd of cmds) {
-    try {
-      await run(cmd, { shell: '/bin/sh' })
-    } catch (err: any) {
-      process.stderr.write(`  (warning) command failed: ${cmd}\n  ${err?.message ?? err}\n`)
-    }
-  }
+  const { performUninstall } = await import('./service.js')
+  const result = await performUninstall(opts.config)
+  for (const m of result.messages) process.stdout.write(m + '\n')
 }
 
 // ---------------------------------------------------------------------------

@@ -412,6 +412,7 @@ export interface PostSetupActions {
   login: () => Promise<void>
   testHeartbeat: () => Promise<{ authenticated: boolean; ok: boolean }>
   dryCheck: () => Promise<Array<{ name: string; up: boolean }>>
+  installService: () => Promise<{ installed: boolean; message: string }>
 }
 
 export async function runPostSetup(p: Prompter, actions: PostSetupActions): Promise<void> {
@@ -434,6 +435,13 @@ export async function runPostSetup(p: Prompter, actions: PostSetupActions): Prom
   if (await p.confirm({ message: 'Run a dry check of your agents now?', default: true })) {
     const results = await actions.dryCheck()
     p.note(results.map(r => `${r.up ? '✓' : '✗'} ${r.name} — ${r.up ? 'up' : 'down'}`).join('\n') || 'No agents to check.')
+  }
+
+  // Offer to run Pulse as a background service so it keeps watching after this
+  // shell closes / the machine reboots — no need to discover `pulse install`.
+  if (await p.confirm({ message: 'Run Pulse as a background service now (keeps watching after reboot)?', default: false })) {
+    const res = await actions.installService()
+    p.note(res.message)
   }
 }
 
@@ -487,6 +495,11 @@ export async function runSetup(opts: { config: string }): Promise<void> {
         const out: Array<{ name: string; up: boolean }> = []
         for (const a of cfg.agents) out.push({ name: a.name, up: await evaluateAgent(a.checks) })
         return out
+      },
+      installService: async () => {
+        const { performInstall } = await import('./service.js')
+        const r = await performInstall(configPath)
+        return { installed: r.installed, message: r.messages.join('\n') }
       },
     })
 

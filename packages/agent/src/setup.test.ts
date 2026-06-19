@@ -217,34 +217,32 @@ describe('collectAnswers', () => {
 })
 
 describe('runPostSetup', () => {
-  it('runs login, test heartbeat, and dry check when all confirmed', async () => {
+  const actions = (calls: string[]) => ({
+    login: async () => { calls.push('login') },
+    testHeartbeat: async () => { calls.push('hb'); return { authenticated: true, ok: true } },
+    dryCheck: async () => { calls.push('check'); return [{ name: 'a', up: true }] },
+    installService: async () => { calls.push('install'); return { installed: true, message: 'ok' } },
+  })
+
+  it('runs login, test heartbeat, dry check, and install when all confirmed', async () => {
     const calls: string[] = []
-    const p = fakePrompter({ confirms: [true, true, true] })
-    await runPostSetup(p, {
-      login: async () => { calls.push('login') },
-      testHeartbeat: async () => { calls.push('hb'); return { authenticated: true, ok: true } },
-      dryCheck: async () => { calls.push('check'); return [{ name: 'a', up: true }] },
-    })
-    expect(calls).toEqual(['login', 'hb', 'check'])
+    await runPostSetup(fakePrompter({ confirms: [true, true, true, true] }), actions(calls))
+    expect(calls).toEqual(['login', 'hb', 'check', 'install'])
   })
 
   it('skips every step when the user declines', async () => {
     const calls: string[] = []
-    const p = fakePrompter({ confirms: [false, false, false] })
-    await runPostSetup(p, {
-      login: async () => { calls.push('login') },
-      testHeartbeat: async () => { calls.push('hb'); return { authenticated: true, ok: true } },
-      dryCheck: async () => { calls.push('check'); return [] },
-    })
+    await runPostSetup(fakePrompter({ confirms: [false, false, false, false] }), actions(calls))
     expect(calls).toEqual([])
   })
 
   it('continues gracefully when login throws', async () => {
-    const p = fakePrompter({ confirms: [true, false, false] })
+    const p = fakePrompter({ confirms: [true, false, false, false] })
     await expect(runPostSetup(p, {
       login: async () => { throw new Error('device code expired') },
       testHeartbeat: async () => ({ authenticated: false, ok: false }),
       dryCheck: async () => [],
+      installService: async () => ({ installed: false, message: 'n/a' }),
     })).resolves.toBeUndefined()
   })
 })

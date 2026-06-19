@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
+import { defaultCredentialsPath } from './account.js'
 
 // ---------------------------------------------------------------------------
 // `pulse install` / `pulse uninstall` — register Pulse itself as a background
@@ -142,4 +143,101 @@ export function planService(configPath: string, deps: PlanDeps = {}): ServicePla
   }
 
   return { platform: 'unsupported', detail: `${platform} is not supported by \`pulse install\` (use launchd or systemd manually).` }
+}
+
+// ---------------------------------------------------------------------------
+// performInstall / performUninstall — the side-effecting wrappers used by both
+// the `pulse install` command and the setup wizard. They refuse to install
+// before login (a service running `start` without a key would crash-loop), and
+// on Linux they auto-run `loginctl enable-linger` so "starts on boot" works
+// without a manual step.
+// ---------------------------------------------------------------------------
+
+export interface InstallResult {
+  installed: boolean
+  manager?: 'launchd' | 'systemd'
+  path?: string
+  messages: string[]
+}
+
+export interface PerformDeps extends PlanDeps {
+  writeFile?: (p: string, data: string) => Promise<void>
+  mkdir?: (p: string) => Promise<void>
+  rm?: (p: string) => Promise<void>
+  runCmd?: (cmd: string) => Promise<{ ok: boolean; error?: string }>
+  isAuthenticated?: () => Promise<boolean>
+  user?: string
+}
+
+async function defaultRunCmd(cmd: string): Promise<{ ok: boolean; error?: string }> {
+  const { exec } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  try {
+    await promisify(exec)(cmd, { shell: '/bin/sh' })
+    return { ok: true }
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? String(err) }
+  }
+}
+
+async function defaultIsAuthenticated(): Promise<boolean> {
+  const { readFile } = await import('node:fs/promises')
+  try {
+    const creds = JSON.parse(await readFile(defaultCredentialsPath(), 'utf8')) as { key?: string }
+    return Boolean(creds.key)
+  } catch {
+    return false
+  }
+}
+
+export async function performInstall(configPath: string, deps: PerformDeps = {}): Promise<InstallResult> {
+  const plan = planService(configPath, deps)
+  if (plan.platform === 'unsupported') return { installed: false, messages: [plan.detail] }
+
+  const isAuthed = deps.isAuthenticated ?? defaultIsAuthenticated
+  if (!(await isAuthed())) {
+    return {
+      installed: false,
+      messages: ['Not logged in. Run `pulse login` first — a service started without credentials would fail to send heartbeats.'],
+    }
+  }
+
+  const runCmd = deps.runCmd ?? defaultRunCmd
+  const writeFileFn = deps.writeFile ?? (async (p: string, data: string) => (await import('node:fs/promises')).writeFile(p, data, 'utf8'))
+  const mkdirFn = deps.mkdir ?? (async (p: string) => { await (await import('node:fs/promises')).mkdir(p, { recursive: true }) })
+
+  await mkdirFn(dirname(plan.path))
+  await writeFileFn(plan.path, plan.content)
+  const messages = [`Wrote ${plan.manager} service to ${plan.path}`]
+
+  for (const cmd of plan.install) {
+    const r = await runCmd(cmd)
+    if (!r.ok) messages.push(`  (warning) command failed: ${cmd}\n  ${r.error}`)
+  }
+
+  // Linux: enable lingering so the user service starts at boot (pre-login).
+  if (plan.platform === 'linux') {
+    const user = deps.user ?? process.env.USER ?? ''
+    const linger = await runCmd(`loginctl enable-linger ${user}`.trim())
+    messages.push(
+      linger.ok
+        ? 'Enabled start-on-boot (loginctl enable-linger).'
+        : `Couldn't enable start-on-boot automatically. For boot persistence run: sudo loginctl enable-linger ${user}`,
+    )
+  }
+
+  messages.push('Pulse is running as a service. Logs: ~/.pulse/pulse.log — stop it with `pulse uninstall`.')
+  return { installed: true, manager: plan.manager, path: plan.path, messages }
+}
+
+export async function performUninstall(configPath: string, deps: PerformDeps = {}): Promise<{ removed: boolean; messages: string[] }> {
+  const plan = planService(configPath, deps)
+  if (plan.platform === 'unsupported') return { removed: false, messages: [plan.detail] }
+
+  const runCmd = deps.runCmd ?? defaultRunCmd
+  const rmFn = deps.rm ?? (async (p: string) => (await import('node:fs/promises')).rm(p, { force: true }))
+
+  for (const cmd of plan.uninstall) await runCmd(cmd)
+  await rmFn(plan.path)
+  return { removed: true, messages: [`Removed ${plan.manager} service (${plan.path}).`] }
 }
