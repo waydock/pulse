@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { launchdPlist, systemdUnit, planService, LAUNCHD_LABEL, SYSTEMD_UNIT, type ServiceSpec } from './service.js'
+import { launchdPlist, systemdUnit, planService, performInstall, performUninstall, LAUNCHD_LABEL, SYSTEMD_UNIT, type ServiceSpec, type PerformDeps } from './service.js'
 
 const spec: ServiceSpec = {
   execPath: '/usr/local/bin/node',
@@ -62,5 +62,87 @@ describe('planService', () => {
     const plan = planService('./pulse.config.yaml', { platform: 'linux', ...common })
     if (plan.platform !== 'linux') throw new Error('wrong platform')
     expect(plan.content).toMatch(/--config \/.*pulse\.config\.yaml/)
+  })
+})
+
+describe('performInstall', () => {
+  const baseDeps = (over: Partial<PerformDeps> = {}): PerformDeps => {
+    const ran: string[] = []
+    const written: string[] = []
+    return {
+      platform: 'linux', home: '/home/u', execPath: '/n', scriptPath: '/s/cli.js', user: 'u',
+      isAuthenticated: async () => true,
+      mkdir: async () => {},
+      writeFile: async (p: string) => { written.push(p) },
+      runCmd: async (cmd: string) => { ran.push(cmd); return { ok: true } },
+      // expose captured state for assertions
+      ...({ _ran: ran, _written: written } as any),
+      ...over,
+    }
+  }
+
+  it('refuses to install when not authenticated', async () => {
+    const r = await performInstall('./c.yaml', baseDeps({ isAuthenticated: async () => false }))
+    expect(r.installed).toBe(false)
+    expect(r.messages.join(' ')).toMatch(/pulse login/)
+  })
+
+  it('refuses on unsupported platforms', async () => {
+    const r = await performInstall('./c.yaml', baseDeps({ platform: 'win32' }))
+    expect(r.installed).toBe(false)
+  })
+
+  it('writes the unit, runs install commands, and auto-enables linger on linux', async () => {
+    const ran: string[] = []
+    const r = await performInstall('./c.yaml', {
+      platform: 'linux', home: '/home/u', execPath: '/n', scriptPath: '/s/cli.js', user: 'u',
+      isAuthenticated: async () => true,
+      mkdir: async () => {},
+      writeFile: async () => {},
+      runCmd: async (cmd: string) => { ran.push(cmd); return { ok: true } },
+    })
+    expect(r.installed).toBe(true)
+    expect(ran).toContain('systemctl --user daemon-reload')
+    expect(ran.some(c => c.includes('enable --now'))).toBe(true)
+    expect(ran).toContain('loginctl enable-linger u') // auto-linger, no manual step
+    expect(r.messages.some(m => /start-on-boot/i.test(m))).toBe(true)
+  })
+
+  it('surfaces a sudo hint when linger cannot be enabled automatically', async () => {
+    const r = await performInstall('./c.yaml', {
+      platform: 'linux', home: '/home/u', execPath: '/n', scriptPath: '/s/cli.js', user: 'u',
+      isAuthenticated: async () => true,
+      mkdir: async () => {}, writeFile: async () => {},
+      runCmd: async (cmd: string) => (cmd.startsWith('loginctl') ? { ok: false, error: 'denied' } : { ok: true }),
+    })
+    expect(r.installed).toBe(true)
+    expect(r.messages.some(m => /sudo loginctl enable-linger u/.test(m))).toBe(true)
+  })
+
+  it('does not enable linger on macOS (launchd RunAtLoad handles it)', async () => {
+    const ran: string[] = []
+    await performInstall('./c.yaml', {
+      platform: 'darwin', home: '/home/u', execPath: '/n', scriptPath: '/s/cli.js',
+      isAuthenticated: async () => true,
+      mkdir: async () => {}, writeFile: async () => {},
+      runCmd: async (cmd: string) => { ran.push(cmd); return { ok: true } },
+    })
+    expect(ran.some(c => c.includes('loginctl'))).toBe(false)
+    expect(ran.some(c => c.includes('launchctl load'))).toBe(true)
+  })
+})
+
+describe('performUninstall', () => {
+  it('runs uninstall commands and removes the unit file', async () => {
+    const ran: string[] = []
+    let removed = ''
+    const r = await performUninstall('./c.yaml', {
+      platform: 'linux', home: '/home/u', execPath: '/n', scriptPath: '/s/cli.js',
+      runCmd: async (cmd: string) => { ran.push(cmd); return { ok: true } },
+      rm: async (p: string) => { removed = p },
+    })
+    expect(r.removed).toBe(true)
+    expect(ran.some(c => c.includes('disable --now'))).toBe(true)
+    expect(removed).toBe(`/home/u/.config/systemd/user/${SYSTEMD_UNIT}`)
   })
 })
