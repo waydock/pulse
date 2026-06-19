@@ -25,6 +25,18 @@ describe('cli run()', () => {
     await run(['check', '--config', '/tmp/x.yaml'], h2)
     expect(h2.check).toHaveBeenCalledWith(expect.objectContaining({ config: '/tmp/x.yaml' }))
   })
+  it('parses init guided/static flags into opts', async () => {
+    const h = fakeHandlers()
+    await run(['init', '-i'], h)
+    expect(h.init).toHaveBeenCalledWith(expect.objectContaining({ interactive: true }))
+    const h2 = fakeHandlers()
+    await run(['init', '--yes'], h2)
+    expect(h2.init).toHaveBeenCalledWith(expect.objectContaining({ yes: true }))
+    const h3 = fakeHandlers()
+    await run(['init'], h3)
+    expect(h3.init).toHaveBeenCalledWith(expect.objectContaining({ interactive: undefined, yes: undefined }))
+  })
+
   it('throws a clear error on an unknown command', async () => {
     await expect(run(['frobnicate'], fakeHandlers())).rejects.toThrow(/unknown command/i)
   })

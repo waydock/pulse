@@ -5,7 +5,8 @@ import { loadConfig } from './config-loader.js'
 import { evaluateAgent } from './checks.js'
 import { startWatch } from './watch.js'
 import { login } from './login.js'
-import type { Handlers } from './cli.js'
+import { runSetup } from './setup.js'
+import type { Handlers, CommandOpts } from './cli.js'
 
 // All Pulse endpoints are served under /api/pulse on the ingest host.
 const INGEST_ORIGIN = 'https://ingest.waydock.ai'
@@ -110,7 +111,23 @@ agents:
     # restart: launchctl kickstart -k gui/$(id -u)/com.example.myservice
 `
 
-async function init(opts: { config: string }): Promise<void> {
+// Decide whether `pulse init` should run the guided wizard. Explicit flags win;
+// otherwise it's guided only when both ends are an interactive terminal (so CI,
+// pipes, and `pulse init >file` keep the predictable static-template behaviour).
+export function shouldRunWizard(
+  opts: Pick<CommandOpts, 'interactive' | 'yes'>,
+  tty: { stdin?: boolean; stdout?: boolean },
+): boolean {
+  if (opts.interactive) return true
+  if (opts.yes) return false
+  return Boolean(tty.stdin && tty.stdout)
+}
+
+async function init(opts: CommandOpts): Promise<void> {
+  if (shouldRunWizard(opts, { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY })) {
+    return runSetup({ config: opts.config })
+  }
+
   const configPath = resolve(opts.config)
 
   // Refuse to overwrite an existing file
