@@ -7,6 +7,7 @@ import {
   yamlScalar,
   validateAnswers,
   collectAnswers,
+  runPostSetup,
   type SetupAnswers,
   type Prompter,
   type SelectOption,
@@ -101,10 +102,12 @@ describe('validateAnswers', () => {
 function fakePrompter(script: {
   texts?: string[]
   selects?: number[] // index chosen per select() call
+  multiselects?: number[][] // indices chosen per multiselect() call
   confirms?: boolean[]
 }): Prompter {
   const texts = [...(script.texts ?? [])]
   const selects = [...(script.selects ?? [])]
+  const multiselects = [...(script.multiselects ?? [])]
   const confirms = [...(script.confirms ?? [])]
   return {
     intro() {},
@@ -118,6 +121,10 @@ function fakePrompter(script: {
     async select<T>({ options }: { options: SelectOption<T>[] }) {
       if (selects.length === 0) throw new Error('fake: ran out of select answers')
       return options[selects.shift()!].value
+    },
+    async multiselect<T>({ options }: { options: SelectOption<T>[] }) {
+      if (multiselects.length === 0) throw new Error('fake: ran out of multiselect answers')
+      return multiselects.shift()!.map(i => options[i].value)
     },
     async confirm() {
       if (confirms.length === 0) throw new Error('fake: ran out of confirm answers')
@@ -178,5 +185,66 @@ describe('collectAnswers', () => {
     })
     const answers = await collectAnswers(p, { hostname: 'h', platform: 'linux' })
     expect(answers.agents.map(a => a.name)).toEqual(['a', 'b'])
+  })
+
+  it('pre-fills agents from autodetection and skips manual entry', async () => {
+    const detected = [
+      { name: 'nginx', source: 'systemd' as const, check: { kind: 'command' as const, value: 'systemctl --user is-active nginx' }, restart: 'systemctl --user restart nginx' },
+      { name: 'api', source: 'pm2' as const, check: { kind: 'process' as const, value: 'api' }, restart: 'pm2 restart api' },
+    ]
+    const p = fakePrompter({
+      texts: ['host'], // just the node name
+      selects: [1], // interval
+      multiselects: [[0, 1]], // pick both detected services
+      confirms: [false /* add manually? no */, false /* webhook? no */],
+    })
+    const answers = await collectAnswers(p, { hostname: 'h', platform: 'linux' }, { detectServices: async () => detected })
+    expect(answers.agents.map(a => a.name)).toEqual(['nginx', 'api'])
+    expect(answers.agents[0].check).toEqual({ kind: 'command', value: 'systemctl --user is-active nginx' })
+    expect(() => validateAnswers(answers)).not.toThrow()
+  })
+
+  it('still forces one manual agent when detection finds nothing', async () => {
+    const p = fakePrompter({
+      texts: ['host', 'svc', 'svc-proc'],
+      selects: [1, 0, 1],
+      confirms: [false /* add another? no */, false /* webhook? no */],
+    })
+    const answers = await collectAnswers(p, { hostname: 'h', platform: 'linux' }, { detectServices: async () => [] })
+    expect(answers.agents).toHaveLength(1)
+    expect(answers.agents[0].name).toBe('svc')
+  })
+})
+
+describe('runPostSetup', () => {
+  it('runs login, test heartbeat, and dry check when all confirmed', async () => {
+    const calls: string[] = []
+    const p = fakePrompter({ confirms: [true, true, true] })
+    await runPostSetup(p, {
+      login: async () => { calls.push('login') },
+      testHeartbeat: async () => { calls.push('hb'); return { authenticated: true, ok: true } },
+      dryCheck: async () => { calls.push('check'); return [{ name: 'a', up: true }] },
+    })
+    expect(calls).toEqual(['login', 'hb', 'check'])
+  })
+
+  it('skips every step when the user declines', async () => {
+    const calls: string[] = []
+    const p = fakePrompter({ confirms: [false, false, false] })
+    await runPostSetup(p, {
+      login: async () => { calls.push('login') },
+      testHeartbeat: async () => { calls.push('hb'); return { authenticated: true, ok: true } },
+      dryCheck: async () => { calls.push('check'); return [] },
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('continues gracefully when login throws', async () => {
+    const p = fakePrompter({ confirms: [true, false, false] })
+    await expect(runPostSetup(p, {
+      login: async () => { throw new Error('device code expired') },
+      testHeartbeat: async () => ({ authenticated: false, ok: false }),
+      dryCheck: async () => [],
+    })).resolves.toBeUndefined()
   })
 })

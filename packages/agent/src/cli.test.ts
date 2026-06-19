@@ -6,7 +6,11 @@ import { pathToFileURL } from 'node:url'
 import { run, isMainEntry } from './cli.js'
 
 function fakeHandlers() {
-  return { init: vi.fn(async () => {}), check: vi.fn(async () => {}), start: vi.fn(async () => {}), login: vi.fn(async () => {}) }
+  const h: any = {}
+  for (const cmd of ['init', 'check', 'start', 'login', 'logout', 'whoami', 'doctor', 'install', 'uninstall', 'upgrade', 'version', 'help']) {
+    h[cmd] = vi.fn(async () => {})
+  }
+  return h as Record<string, ReturnType<typeof vi.fn>>
 }
 
 describe('cli run()', () => {
@@ -46,6 +50,35 @@ describe('cli run()', () => {
     const h3 = fakeHandlers()
     await run(['start', '-q'], h3)
     expect(h3.start).toHaveBeenCalledWith(expect.objectContaining({ quiet: true }))
+  })
+
+  it('routes --version/-v and bare/--help to the version/help handlers', async () => {
+    const h = fakeHandlers()
+    await run(['--version'], h)
+    expect(h.version).toHaveBeenCalledOnce()
+    const h2 = fakeHandlers()
+    await run(['-v'], h2)
+    expect(h2.version).toHaveBeenCalledOnce()
+    const h3 = fakeHandlers()
+    await run([], h3)
+    expect(h3.help).toHaveBeenCalledOnce()
+    const h4 = fakeHandlers()
+    await run(['--help'], h4)
+    expect(h4.help).toHaveBeenCalledOnce()
+  })
+
+  it('parses --json into opts.json for check', async () => {
+    const h = fakeHandlers()
+    await run(['check', '--json'], h)
+    expect(h.check).toHaveBeenCalledWith(expect.objectContaining({ json: true }))
+  })
+
+  it('routes the new commands to their handlers', async () => {
+    for (const cmd of ['logout', 'whoami', 'doctor', 'install', 'uninstall', 'upgrade'] as const) {
+      const h = fakeHandlers()
+      await run([cmd], h)
+      expect(h[cmd]).toHaveBeenCalledOnce()
+    }
   })
 
   it('throws a clear error on an unknown command', async () => {

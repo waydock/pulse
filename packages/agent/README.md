@@ -12,13 +12,31 @@ Requires Node.js >= 20.
 ## Quick start
 
 ```bash
-pulse init      # set up pulse.config.yaml (guided wizard in a terminal)
+pulse init      # set up pulse.config.yaml (guided wizard; offers login + a test heartbeat)
 pulse login     # authenticate this machine (device flow) -> ~/.pulse/credentials.json
 pulse check     # evaluate all agents once and print a status table (no restarts, no network)
 pulse start     # run the watch + heartbeat loops in the foreground
+pulse install   # run Pulse as a background service so it survives reboot
 ```
 
 All commands accept `--config <path>` (default: `./pulse.config.yaml`).
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `init` | Guided setup wizard (autodetects running services; chains into login + a verifying heartbeat). `--yes` writes the static template. |
+| `login` / `logout` | Authenticate this machine / remove stored credentials. |
+| `whoami` | Show auth status, a masked key fingerprint, and where this node reports. |
+| `check` | Evaluate all agents once. `--json` emits machine-readable output for CI/cron. |
+| `start` | Run the watch + heartbeat loops in the foreground. `--quiet` silences the per-beat status line. |
+| `doctor` | Preflight diagnostics: Node version, config, auth, ingest reachability, agent status, restart binaries on PATH. |
+| `install` / `uninstall` | Register/remove Pulse as a background service — launchd (macOS) or a systemd **user** unit (Linux). |
+| `upgrade` | Reinstall the latest published version (`npm i -g @waydock/pulse@latest`). |
+| `version` | Print the CLI version (`pulse --version` / `-v`). |
+
+A best-effort "update available" note is shown (at most once a day) when a newer
+version is on npm.
 
 ### `pulse init`
 
