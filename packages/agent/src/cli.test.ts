@@ -36,6 +36,17 @@ describe('cli run()', () => {
     await run(['init'], h3)
     expect(h3.init).toHaveBeenCalledWith(expect.objectContaining({ interactive: undefined, yes: undefined }))
   })
+  it('parses --quiet / -q into opts.quiet (default false)', async () => {
+    const h = fakeHandlers()
+    await run(['start'], h)
+    expect(h.start).toHaveBeenCalledWith(expect.objectContaining({ quiet: false }))
+    const h2 = fakeHandlers()
+    await run(['start', '--quiet'], h2)
+    expect(h2.start).toHaveBeenCalledWith(expect.objectContaining({ quiet: true }))
+    const h3 = fakeHandlers()
+    await run(['start', '-q'], h3)
+    expect(h3.start).toHaveBeenCalledWith(expect.objectContaining({ quiet: true }))
+  })
 
   it('throws a clear error on an unknown command', async () => {
     await expect(run(['frobnicate'], fakeHandlers())).rejects.toThrow(/unknown command/i)
