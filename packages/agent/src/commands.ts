@@ -38,7 +38,7 @@ export async function loadConfigOrExit(
 // ---------------------------------------------------------------------------
 // check — read-only: evaluate all agents and print a table, no restart, no POST
 // ---------------------------------------------------------------------------
-async function check(opts: { config: string }): Promise<void> {
+async function check(opts: { config: string; json?: boolean }): Promise<void> {
   const config = await loadConfigOrExit(opts.config)
 
   const results = await Promise.all(
@@ -47,6 +47,11 @@ async function check(opts: { config: string }): Promise<void> {
       up: await evaluateAgent(agent.checks),
     })),
   )
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ node: config.node, agents: results }) + '\n')
+    return
+  }
 
   // Print table
   const nameWidth = Math.max(4, ...results.map(r => r.name.length))
@@ -194,6 +199,126 @@ async function loginCmd(opts: { config: string }): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// logout / whoami
+// ---------------------------------------------------------------------------
+async function logoutCmd(_opts: CommandOpts): Promise<void> {
+  const { logout } = await import('./account.js')
+  const { removed, path } = await logout()
+  process.stdout.write(removed ? `Logged out (removed ${path}).\n` : 'Not logged in.\n')
+}
+
+async function whoamiCmd(opts: CommandOpts): Promise<void> {
+  const { readWhoami, formatWhoami } = await import('./account.js')
+  const info = await readWhoami({ configPath: opts.config })
+  process.stdout.write(formatWhoami(info) + '\n')
+}
+
+// ---------------------------------------------------------------------------
+// doctor — preflight diagnostics
+// ---------------------------------------------------------------------------
+async function doctorCmd(opts: CommandOpts): Promise<void> {
+  const { runDoctor, formatReport } = await import('./doctor.js')
+  const report = await runDoctor({ configPath: opts.config })
+  process.stdout.write(formatReport(report))
+  if (!report.ok) process.exit(1)
+}
+
+// ---------------------------------------------------------------------------
+// install / uninstall — register Pulse as a background service
+// ---------------------------------------------------------------------------
+async function installCmd(opts: CommandOpts): Promise<void> {
+  const { planService } = await import('./service.js')
+  const plan = planService(opts.config)
+  if (plan.platform === 'unsupported') {
+    process.stderr.write(plan.detail + '\n')
+    process.exit(1)
+  }
+
+  const { mkdir, writeFile } = await import('node:fs/promises')
+  const { dirname } = await import('node:path')
+  await mkdir(dirname(plan.path), { recursive: true })
+  await writeFile(plan.path, plan.content, 'utf8')
+  process.stdout.write(`Wrote ${plan.manager} service to ${plan.path}\n`)
+
+  await runShell(plan.install)
+  if (plan.note) process.stdout.write(`\nNote: ${plan.note}\n`)
+  process.stdout.write(`\nPulse is now running as a service. Logs: ~/.pulse/pulse.log\nStop it with \`pulse uninstall\`.\n`)
+}
+
+async function uninstallCmd(opts: CommandOpts): Promise<void> {
+  const { planService } = await import('./service.js')
+  const plan = planService(opts.config)
+  if (plan.platform === 'unsupported') {
+    process.stderr.write(plan.detail + '\n')
+    process.exit(1)
+  }
+
+  await runShell(plan.uninstall)
+  const { rm } = await import('node:fs/promises')
+  await rm(plan.path, { force: true })
+  process.stdout.write(`Removed ${plan.manager} service (${plan.path}).\n`)
+}
+
+/** Run a sequence of shell commands, surfacing failures but never throwing. */
+async function runShell(cmds: string[]): Promise<void> {
+  const { exec } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const run = promisify(exec)
+  for (const cmd of cmds) {
+    try {
+      await run(cmd, { shell: '/bin/sh' })
+    } catch (err: any) {
+      process.stderr.write(`  (warning) command failed: ${cmd}\n  ${err?.message ?? err}\n`)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// upgrade / version / help
+// ---------------------------------------------------------------------------
+async function upgradeCmd(_opts: CommandOpts): Promise<void> {
+  const { upgrade } = await import('./upgrade.js')
+  const code = await upgrade()
+  if (code !== 0) process.exit(code)
+}
+
+async function versionCmd(_opts: CommandOpts): Promise<void> {
+  const { getVersion } = await import('./version.js')
+  process.stdout.write(`${await getVersion()}\n`)
+}
+
+async function helpCmd(_opts: CommandOpts): Promise<void> {
+  process.stdout.write(HELP_TEXT)
+}
+
+export const HELP_TEXT = `pulse — open-source watcher CLI
+
+Usage: pulse <command> [options]
+
+Commands:
+  init        Set up pulse.config.yaml (guided wizard on a terminal; --yes for the static template)
+  login       Authenticate this machine (device flow)
+  logout      Remove stored credentials
+  whoami      Show authentication status for this machine
+  check       Evaluate all agents once and print status (--json for machine-readable output)
+  start       Run the watch + heartbeat loops in the foreground (--quiet to silence per-beat status)
+  doctor      Run preflight diagnostics
+  install     Run Pulse as a background service (launchd/systemd)
+  uninstall   Remove the background service
+  upgrade     Update to the latest published version
+  version     Print the CLI version
+  help        Show this help
+
+Options:
+  --config <path>   Config file (default: ./pulse.config.yaml)
+  -i, --interactive Force the guided wizard (init)
+  -y, --yes         Use the static template (init)
+  -q, --quiet       Silence per-heartbeat status (start)
+  --json            Machine-readable output (check)
+  -v, --version     Print version
+`
+
+// ---------------------------------------------------------------------------
 // Export as the real defaultHandlers shape
 // ---------------------------------------------------------------------------
 export const commands: Handlers = {
@@ -201,4 +326,12 @@ export const commands: Handlers = {
   check,
   start,
   login: loginCmd,
+  logout: logoutCmd,
+  whoami: whoamiCmd,
+  doctor: doctorCmd,
+  install: installCmd,
+  uninstall: uninstallCmd,
+  upgrade: upgradeCmd,
+  version: versionCmd,
+  help: helpCmd,
 }

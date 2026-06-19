@@ -3,7 +3,8 @@ import { writeFile, access, mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { hostname as osHostname } from 'node:os'
 import { Config } from '@waydock/pulse-core'
-import { DEFAULT_HEARTBEAT_URL } from './commands.js'
+import { DEFAULT_HEARTBEAT_URL, DEFAULT_INGEST_BASE } from './commands.js'
+import { detectServices, toAgentAnswer, type DetectedService } from './autodetect.js'
 
 // ---------------------------------------------------------------------------
 // Guided setup ("pulse init" on a TTY). The flow is intentionally split so it
@@ -144,6 +145,7 @@ export interface Prompter {
     validate?: (v: string) => string | undefined
   }): Promise<string>
   select<T>(opts: { message: string; options: SelectOption<T>[]; initial?: number }): Promise<T>
+  multiselect<T>(opts: { message: string; options: SelectOption<T>[] }): Promise<T[]>
   confirm(opts: { message: string; default?: boolean }): Promise<boolean>
   outro(msg: string): void
   close(): void
@@ -250,6 +252,23 @@ export function createReadlinePrompter(): Prompter {
         write(`${red('▲')}  Enter a number between 1 and ${options.length}.\n`)
       }
     },
+    async multiselect({ message, options }) {
+      write(`${cyan('◇')}  ${message}\n`)
+      options.forEach((o, i) => {
+        const hint = o.hint ? dim(`  — ${o.hint}`) : ''
+        write(`${GUTTER}  ${dim('○')} ${i + 1}. ${o.label}${hint}\n`)
+      })
+      write(`${GUTTER}  ${dim('enter numbers separated by spaces/commas, or blank for none')}\n`)
+      for (;;) {
+        const raw = (await ask(`${GUTTER}  ${dim('›')} `)).trim()
+        if (raw === '') return []
+        const idxs = raw.split(/[\s,]+/).map(t => Number(t) - 1)
+        if (idxs.every(i => Number.isInteger(i) && i >= 0 && i < options.length)) {
+          return [...new Set(idxs)].map(i => options[i].value)
+        }
+        write(`${red('▲')}  Use numbers between 1 and ${options.length}.\n`)
+      }
+    },
     async confirm({ message, default: def = true }) {
       const hint = def ? 'Y/n' : 'y/N'
       for (;;) {
@@ -282,9 +301,15 @@ const validUrl = (v: string) => {
   }
 }
 
+export interface CollectDeps {
+  /** Detect running services to offer as pre-filled agents (best-effort). */
+  detectServices?: () => Promise<DetectedService[]>
+}
+
 export async function collectAnswers(
   p: Prompter,
   env: { hostname: string; platform: NodeJS.Platform },
+  deps: CollectDeps = {},
 ): Promise<SetupAnswers> {
   p.intro('Pulse setup')
   p.note('Answer a few questions and Pulse writes a ready-to-run pulse.config.yaml.\nPress Enter to accept the [default] in parentheses.')
@@ -306,7 +331,24 @@ export async function collectAnswers(
   })
 
   const agents: AgentAnswer[] = []
-  do {
+
+  // Autodetect: offer running services as ready-made agents before manual entry.
+  const detected = deps.detectServices ? await deps.detectServices().catch(() => []) : []
+  if (detected.length > 0) {
+    const picked = await p.multiselect<DetectedService>({
+      message: `Found ${detected.length} running service${detected.length === 1 ? '' : 's'} — which should Pulse watch?`,
+      options: detected.map(s => ({ value: s, label: s.name, hint: s.source })),
+    })
+    agents.push(...picked.map(toAgentAnswer))
+  }
+
+  // Manual entry: forced if we have nothing yet, otherwise opt-in.
+  let more =
+    agents.length === 0
+      ? true
+      : await p.confirm({ message: 'Add another agent manually?', default: false })
+
+  while (more || agents.length === 0) {
     p.note(agents.length === 0 ? "Now let's add something to watch." : 'Add another thing to watch.')
 
     const name = await p.text({ message: 'What do you want to watch? (short name)', validate: nonEmpty('Name') })
@@ -350,7 +392,8 @@ export async function collectAnswers(
     }
 
     agents.push({ name, check, restart })
-  } while (await p.confirm({ message: 'Add another agent?', default: false }))
+    more = await p.confirm({ message: 'Add another agent?', default: false })
+  }
 
   let webhookUrl: string | undefined
   if (await p.confirm({ message: 'Send alerts to a webhook (e.g. Discord)?', default: false })) {
@@ -361,8 +404,42 @@ export async function collectAnswers(
 }
 
 // ---------------------------------------------------------------------------
+// Post-setup chaining — take the user from "config written" to "verified
+// heartbeat" in the same flow, the way Stripe/Vercel close their onboarding.
+// Actions are injected so the flow is testable without real auth/network.
+// ---------------------------------------------------------------------------
+export interface PostSetupActions {
+  login: () => Promise<void>
+  testHeartbeat: () => Promise<{ authenticated: boolean; ok: boolean }>
+  dryCheck: () => Promise<Array<{ name: string; up: boolean }>>
+}
+
+export async function runPostSetup(p: Prompter, actions: PostSetupActions): Promise<void> {
+  if (await p.confirm({ message: 'Log in now to authenticate this machine?', default: true })) {
+    try {
+      await actions.login()
+      p.note('✓ Logged in.')
+    } catch (err: any) {
+      p.note(`Login failed: ${err?.message ?? err}. You can run \`pulse login\` later.`)
+    }
+  }
+
+  if (await p.confirm({ message: 'Send a test heartbeat to confirm Waydock is receiving?', default: true })) {
+    const res = await actions.testHeartbeat()
+    if (!res.authenticated) p.note('Not logged in — skipped. Run `pulse login`, then `pulse start`.')
+    else if (res.ok) p.note('✓ Waydock received your first heartbeat.')
+    else p.note('Heartbeat did not reach Waydock (network/auth). It will retry once running.')
+  }
+
+  if (await p.confirm({ message: 'Run a dry check of your agents now?', default: true })) {
+    const results = await actions.dryCheck()
+    p.note(results.map(r => `${r.up ? '✓' : '✗'} ${r.name} — ${r.up ? 'up' : 'down'}`).join('\n') || 'No agents to check.')
+  }
+}
+
+// ---------------------------------------------------------------------------
 // runSetup — the real command entry: drive the wizard, validate, write the file
-// (asking before clobbering an existing one), and print next steps.
+// (asking before clobbering an existing one), then chain into login/verify.
 // ---------------------------------------------------------------------------
 export async function runSetup(opts: { config: string }): Promise<void> {
   const configPath = resolve(opts.config)
@@ -370,7 +447,11 @@ export async function runSetup(opts: { config: string }): Promise<void> {
 
   try {
     const exists = await access(configPath).then(() => true, () => false)
-    const answers = await collectAnswers(p, { hostname: osHostname(), platform: process.platform })
+    const answers = await collectAnswers(
+      p,
+      { hostname: osHostname(), platform: process.platform },
+      { detectServices: () => detectServices() },
+    )
 
     validateAnswers(answers)
     const yaml = buildConfigYaml(answers)
@@ -388,14 +469,28 @@ export async function runSetup(opts: { config: string }): Promise<void> {
 
     await mkdir(dirname(configPath), { recursive: true })
     await writeFile(configPath, yaml, 'utf8')
-
     p.note(`Wrote ${configPath}:\n\n${yaml}`)
-    p.outro(
-      'Next steps:\n' +
-        '  pulse login    authenticate this machine\n' +
-        '  pulse check    dry-run your checks (no restarts, no network)\n' +
-        '  pulse start    run the watcher',
-    )
+
+    await runPostSetup(p, {
+      login: async () => {
+        const { login } = await import('./login.js')
+        await login({ base: DEFAULT_INGEST_BASE, hostname: osHostname() })
+      },
+      testHeartbeat: async () => {
+        const { sendTestHeartbeat } = await import('./test-heartbeat.js')
+        return sendTestHeartbeat(configPath)
+      },
+      dryCheck: async () => {
+        const { loadConfig } = await import('./config-loader.js')
+        const { evaluateAgent } = await import('./checks.js')
+        const cfg = await loadConfig(configPath)
+        const out: Array<{ name: string; up: boolean }> = []
+        for (const a of cfg.agents) out.push({ name: a.name, up: await evaluateAgent(a.checks) })
+        return out
+      },
+    })
+
+    p.outro('Pulse is set up. Run `pulse start` to watch, or `pulse install` to run it as a service.')
   } catch (err) {
     if (err instanceof CancelledError) {
       process.stdout.write('\nSetup cancelled. No changes made.\n')
