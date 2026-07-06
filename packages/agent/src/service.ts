@@ -56,6 +56,9 @@ ${argXml}
 
 export function systemdUnit(spec: ServiceSpec): string {
   const exec = [spec.execPath, spec.scriptPath, 'start', '--quiet', '--config', spec.configPath].join(' ')
+  // Redirect stdout/stderr to the same log file launchd uses, so `pulse logs`
+  // works uniformly. Without this, systemd sends output to the journal and
+  // ~/.pulse/pulse.log is never created. `append:` needs systemd >= 240.
   return `[Unit]
 Description=Pulse watcher (waydock-pulse)
 After=network-online.target
@@ -66,6 +69,8 @@ ExecStart=${exec}
 Restart=always
 RestartSec=5
 WorkingDirectory=${spec.workingDir}
+StandardOutput=append:${spec.logPath}
+StandardError=append:${spec.logPath}
 
 [Install]
 WantedBy=default.target
