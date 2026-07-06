@@ -203,6 +203,27 @@ async function loginCmd(opts: { config: string }): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// status — what the running watcher last saw (from the persisted state file)
+// ---------------------------------------------------------------------------
+async function statusCmd(opts: CommandOpts): Promise<void> {
+  const { readStatus, formatStatus } = await import('./status.js')
+  const info = await readStatus({ configPath: opts.config })
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(info) + '\n')
+    return
+  }
+  process.stdout.write(formatStatus(info))
+}
+
+// ---------------------------------------------------------------------------
+// logs — tail the service log file
+// ---------------------------------------------------------------------------
+async function logsCmd(opts: CommandOpts): Promise<void> {
+  const { runLogs } = await import('./logs.js')
+  await runLogs({ follow: opts.follow, lines: opts.lines })
+}
+
+// ---------------------------------------------------------------------------
 // logout / whoami
 // ---------------------------------------------------------------------------
 async function logoutCmd(_opts: CommandOpts): Promise<void> {
@@ -272,6 +293,8 @@ Commands:
   logout      Remove stored credentials
   whoami      Show authentication status for this machine
   check       Evaluate all agents once and print status (--json for machine-readable output)
+  status      Show what the running watcher last saw (from the persisted state file)
+  logs        Tail the service log (--follow to stream, --lines N for how many)
   start       Run the watch + heartbeat loops in the foreground (--quiet to silence per-beat status)
   doctor      Run preflight diagnostics
   install     Run Pulse as a background service (launchd/systemd)
@@ -285,7 +308,9 @@ Options:
   -i, --interactive Force the guided wizard (init)
   -y, --yes         Use the static template (init)
   -q, --quiet       Silence per-heartbeat status (start)
-  --json            Machine-readable output (check)
+  --json            Machine-readable output (check, status)
+  -f, --follow      Stream new log lines (logs)
+  -n, --lines <n>   How many log lines to show (logs, default 50)
   -v, --version     Print version
 `
 
@@ -295,6 +320,8 @@ Options:
 export const commands: Handlers = {
   init,
   check,
+  status: statusCmd,
+  logs: logsCmd,
   start,
   login: loginCmd,
   logout: logoutCmd,

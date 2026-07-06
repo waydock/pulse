@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getVersion, isNewer, checkForUpdate } from './version.js'
+import { getVersion, isNewer, checkForUpdate, shouldNotify } from './version.js'
 
 describe('getVersion', () => {
   it('matches the version in package.json', async () => {
@@ -73,5 +73,16 @@ describe('checkForUpdate', () => {
   it('returns null (never throws) when the registry is unreachable', async () => {
     const fetch = vi.fn(async () => { throw new Error('offline') }) as any
     expect(await checkForUpdate('0.1.8', { fetch, now: () => 1, ...fakeCache() })).toBeNull()
+  })
+})
+
+describe('shouldNotify', () => {
+  it('notifies only on an interactive, non-CI, non-opted-out run', () => {
+    expect(shouldNotify({}, true)).toBe(true)
+  })
+  it('is suppressed off a TTY, in CI, or when opted out', () => {
+    expect(shouldNotify({}, false)).toBe(false)
+    expect(shouldNotify({ CI: 'true' }, true)).toBe(false)
+    expect(shouldNotify({ NO_UPDATE_NOTIFIER: '1' }, true)).toBe(false)
   })
 })

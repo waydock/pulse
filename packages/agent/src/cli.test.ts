@@ -7,7 +7,7 @@ import { run, isMainEntry } from './cli.js'
 
 function fakeHandlers() {
   const h: any = {}
-  for (const cmd of ['init', 'check', 'start', 'login', 'logout', 'whoami', 'doctor', 'install', 'uninstall', 'upgrade', 'version', 'help']) {
+  for (const cmd of ['init', 'check', 'status', 'logs', 'start', 'login', 'logout', 'whoami', 'doctor', 'install', 'uninstall', 'upgrade', 'version', 'help']) {
     h[cmd] = vi.fn(async () => {})
   }
   return h as Record<string, ReturnType<typeof vi.fn>>
@@ -74,11 +74,23 @@ describe('cli run()', () => {
   })
 
   it('routes the new commands to their handlers', async () => {
-    for (const cmd of ['logout', 'whoami', 'doctor', 'install', 'uninstall', 'upgrade'] as const) {
+    for (const cmd of ['status', 'logs', 'logout', 'whoami', 'doctor', 'install', 'uninstall', 'upgrade'] as const) {
       const h = fakeHandlers()
       await run([cmd], h)
       expect(h[cmd]).toHaveBeenCalledOnce()
     }
+  })
+
+  it('parses --follow/-f and --lines/-n for logs', async () => {
+    const h = fakeHandlers()
+    await run(['logs', '-f', '-n', '100'], h)
+    expect(h.logs).toHaveBeenCalledWith(expect.objectContaining({ follow: true, lines: 100 }))
+    const h2 = fakeHandlers()
+    await run(['logs'], h2)
+    expect(h2.logs).toHaveBeenCalledWith(expect.objectContaining({ follow: undefined, lines: undefined }))
+    const h3 = fakeHandlers()
+    await run(['logs', '--lines', 'abc'], h3) // invalid count ignored
+    expect(h3.logs).toHaveBeenCalledWith(expect.objectContaining({ lines: undefined }))
   })
 
   it('throws a clear error on an unknown command', async () => {
