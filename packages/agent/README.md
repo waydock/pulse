@@ -29,7 +29,9 @@ All commands accept `--config <path>` (default: `./pulse.config.yaml`).
 | `init` | Guided setup wizard (autodetects running services; chains into login → a verifying heartbeat → an optional `install`). `--yes` writes the static template. |
 | `login` / `logout` | Authenticate this machine / remove stored credentials. |
 | `whoami` | Show auth status, a masked key fingerprint, and where this node reports. |
-| `check` | Evaluate all agents once. `--json` emits machine-readable output for CI/cron. |
+| `check` | Evaluate all agents once (re-runs the checks). `--json` emits machine-readable output for CI/cron. |
+| `status` | Show what the *running* watcher last saw, from the persisted state file (no re-evaluation) + how long ago it updated. `--json` too. |
+| `logs` | Tail the service log (`~/.pulse/pulse.log`). `--follow`/`-f` to stream, `--lines`/`-n <count>` for how many. |
 | `start` | Run the watch + heartbeat loops in the foreground. `--quiet` silences the per-beat status line. |
 | `doctor` | Preflight diagnostics: Node version, config, auth, ingest reachability, agent status, restart binaries on PATH. |
 | `install` / `uninstall` | Register/remove Pulse as a background service — launchd (macOS) or a systemd **user** unit (Linux); on Linux it auto-enables `loginctl` lingering so it starts on boot. |

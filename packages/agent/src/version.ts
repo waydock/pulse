@@ -88,6 +88,18 @@ export async function checkForUpdate(current: string, deps: UpdateCheckDeps = {}
   return isNewer(latest, current) ? latest : null
 }
 
+/**
+ * Whether the update notifier should run. Suppressed in CI, when explicitly
+ * opted out (NO_UPDATE_NOTIFIER), or when stderr isn't a TTY (scripts/pipes) —
+ * so automated runs never see the note. Pure + testable.
+ */
+export function shouldNotify(env: NodeJS.ProcessEnv, isTTY: boolean): boolean {
+  if (!isTTY) return false
+  if (env.NO_UPDATE_NOTIFIER) return false
+  if (env.CI) return false
+  return true
+}
+
 /** Print an unobtrusive upgrade note to stderr. Never throws. */
 export async function notifyIfUpdate(current: string, deps: UpdateCheckDeps = {}): Promise<void> {
   try {

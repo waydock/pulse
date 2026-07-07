@@ -13,11 +13,16 @@ export type CommandOpts = {
   // template (`-y`/`--yes`). Unset => decide from whether stdin/stdout is a TTY.
   interactive?: boolean
   yes?: boolean
+  // logs only: follow (`-f`/`--follow`) and how many lines (`-n`/`--lines`).
+  follow?: boolean
+  lines?: number
 }
 
 export type Command =
   | 'init'
   | 'check'
+  | 'status'
+  | 'logs'
   | 'start'
   | 'login'
   | 'logout'
@@ -32,7 +37,7 @@ export type Command =
 export type Handlers = Record<Command, (opts: CommandOpts) => Promise<void>>
 
 const COMMANDS: readonly Command[] = [
-  'init', 'check', 'start', 'login', 'logout', 'whoami',
+  'init', 'check', 'status', 'logs', 'start', 'login', 'logout', 'whoami',
   'doctor', 'install', 'uninstall', 'upgrade', 'version', 'help',
 ]
 
@@ -46,21 +51,30 @@ function resolveCommand(first: string | undefined): Command | undefined {
 export async function run(argv: string[], handlers: Handlers): Promise<void> {
   const cmd = resolveCommand(argv[0])
 
-  // Parse flags: --config <path>, --quiet/-q, --json, --interactive/-i, --yes/-y
+  // Parse flags: --config <path>, --quiet/-q, --json, --interactive/-i,
+  // --yes/-y, --follow/-f, --lines/-n <count>
   let config = './pulse.config.yaml'
   let quiet = false
   let json: boolean | undefined
   let interactive: boolean | undefined
   let yes: boolean | undefined
+  let follow: boolean | undefined
+  let lines: number | undefined
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--config' && argv[i + 1] !== undefined) {
       config = argv[i + 1]
       i++
+    } else if ((arg === '--lines' || arg === '-n') && argv[i + 1] !== undefined) {
+      const n = parseInt(argv[i + 1], 10)
+      if (Number.isFinite(n) && n > 0) lines = n
+      i++
     } else if (arg === '--quiet' || arg === '-q') {
       quiet = true
     } else if (arg === '--json') {
       json = true
+    } else if (arg === '--follow' || arg === '-f') {
+      follow = true
     } else if (arg === '--interactive' || arg === '-i' || arg === '--guided') {
       interactive = true
     } else if (arg === '--yes' || arg === '-y' || arg === '--non-interactive') {
@@ -68,7 +82,7 @@ export async function run(argv: string[], handlers: Handlers): Promise<void> {
     }
   }
 
-  const opts: CommandOpts = { config, quiet, json, interactive, yes }
+  const opts: CommandOpts = { config, quiet, json, interactive, yes, follow, lines }
 
   if (!cmd) {
     throw new Error(`unknown command: ${argv[0]}`)
@@ -85,10 +99,11 @@ export async function main(): Promise<void> {
 
   // After a one-shot command finishes, surface an upgrade notice (best-effort,
   // cached, stderr-only). Skipped for `start` (which blocks above and never
-  // returns) and for the meta commands where it would just be noise.
+  // returns), the meta commands where it would be noise, and any non-interactive
+  // run (CI, pipes, NO_UPDATE_NOTIFIER) so scripts never see it.
   const cmd = resolveCommand(argv[0])
-  if (cmd && cmd !== 'version' && cmd !== 'help' && cmd !== 'upgrade') {
-    const { getVersion, notifyIfUpdate } = await import('./version.js')
+  const { getVersion, notifyIfUpdate, shouldNotify } = await import('./version.js')
+  if (cmd && cmd !== 'version' && cmd !== 'help' && cmd !== 'upgrade' && shouldNotify(process.env, Boolean(process.stderr.isTTY))) {
     await notifyIfUpdate(await getVersion()).catch(() => {})
   }
 }

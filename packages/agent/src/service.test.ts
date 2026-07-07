@@ -29,6 +29,12 @@ describe('systemdUnit', () => {
     expect(unit).toContain('Restart=always')
     expect(unit).toContain('WantedBy=default.target')
   })
+
+  it('redirects stdout/stderr to the log file so `pulse logs` works on Linux', () => {
+    const unit = systemdUnit(spec)
+    expect(unit).toContain('StandardOutput=append:/home/u/.pulse/pulse.log')
+    expect(unit).toContain('StandardError=append:/home/u/.pulse/pulse.log')
+  })
 })
 
 describe('planService', () => {
