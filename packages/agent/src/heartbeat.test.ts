@@ -62,9 +62,42 @@ describe('startHeartbeatLoop', () => {
       setIntervalFn: (fn, ms) => fakeTimer.set(fn, ms),
       clearIntervalFn: () => fakeTimer.clear(),
     })
-    // simulate three timer fires
-    await fakeTimer.handlers[0](); await fakeTimer.handlers[0](); await fakeTimer.handlers[0]()
+    // Simulate three timer fires. The settle between them is what a real
+    // interval gives you for free: the loop guard drops a firing that lands
+    // while the previous beat is still in flight, so back-to-back synchronous
+    // fires would (correctly) be coalesced rather than counted.
+    const settle = () => new Promise((r) => setTimeout(r, 0))
+    for (let i = 0; i < 3; i++) {
+      fakeTimer.handlers[0]()
+      await settle()
+    }
     expect(sent).toHaveLength(3)
+    stop()
+  })
+
+  it('drops a firing that lands while the previous beat is still in flight', async () => {
+    const sent: number[] = []
+    const fakeTimer = { handlers: [] as Function[], set(fn: Function, _ms: number) { this.handlers.push(fn); return 1 as any }, clear() {} }
+    let release!: () => void
+    const blocked = new Promise<void>((r) => { release = r })
+    const stop = startHeartbeatLoop({
+      intervalMs: 1000,
+      tick: async () => { sent.push(0); await blocked },
+      setIntervalFn: (fn, ms) => fakeTimer.set(fn, ms),
+      clearIntervalFn: () => fakeTimer.clear(),
+    })
+
+    fakeTimer.handlers[0]() // starts, then hangs on `blocked`
+    fakeTimer.handlers[0]() // must be dropped, not queued behind it
+    fakeTimer.handlers[0]()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(sent).toHaveLength(1)
+
+    release()
+    await new Promise((r) => setTimeout(r, 0))
+    fakeTimer.handlers[0]() // the loop resumes once the slow beat finishes
+    await new Promise((r) => setTimeout(r, 0))
+    expect(sent).toHaveLength(2)
     stop()
   })
 })

@@ -1,5 +1,6 @@
 import { loadavg } from 'node:os'
 import type { AgentStatus, HeartbeatPayload, Metrics } from '@waydock/pulse-core'
+import { nonOverlapping } from './loop.js'
 
 export type { AgentStatus, HeartbeatPayload, Metrics }
 
@@ -91,9 +92,10 @@ export function startHeartbeatLoop(opts: HeartbeatLoopOpts): () => void {
   const setFn = opts.setIntervalFn ?? setInterval
   const clearFn = opts.clearIntervalFn ?? clearInterval
 
-  const id = setFn(() => {
-    opts.tick().catch(() => { /* swallow — heartbeat must never crash the process */ })
-  }, opts.intervalMs)
+  // Guarded for the same reason as the check loop: the send has an 8s timeout
+  // and metrics collection can stall on a busy disk, so a firing must not
+  // stack a second beat on top of one still in flight.
+  const id = setFn(nonOverlapping(opts.tick), opts.intervalMs)
 
   return () => clearFn(id)
 }
