@@ -1,6 +1,6 @@
 {
   "name": "@waydock/pulse",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Watch what you run: health checks, automatic restarts, and heartbeats to Waydock Pulse. One YAML file, installs as a background service on macOS and Linux.",
   "keywords": [
     "waydock",
@@ -32,7 +32,7 @@
   "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run" },
   "dependencies": {
     "@waydock/pulse-core": "^0.1.0",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.3.1",
     "systeminformation": "^5.23.0"
   },
   "devDependencies": { "@types/js-yaml": "^4.0.9", "@types/node": "^22.0.0" },
