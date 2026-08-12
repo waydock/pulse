@@ -1,6 +1,15 @@
 {
   "name": "waydock-pulse",
+  "description": "Monorepo for Pulse, the open-source watcher CLI behind Waydock Pulse.",
   "private": true,
+  "license": "MIT",
+  "author": { "name": "Waydock", "url": "https://waydock.ai" },
+  "homepage": "https://waydock.ai/docs/pulse",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/waydock/pulse.git"
+  },
+  "bugs": { "url": "https://github.com/waydock/pulse/issues" },
   "workspaces": ["packages/*"],
   "engines": { "node": ">=20" },
   "scripts": {

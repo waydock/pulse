@@ -1,17 +1,25 @@
 {
   "name": "@waydock/pulse-core",
   "version": "0.1.1",
-  "description": "Shared types and config/heartbeat schema (zod) for @waydock/pulse.",
-  "keywords": ["monitoring", "heartbeat", "schema", "zod", "types"],
+  "description": "Shared types and the zod config and heartbeat schema behind @waydock/pulse. Contract layer only, no runtime side effects.",
+  "keywords": [
+    "waydock",
+    "pulse",
+    "monitoring",
+    "heartbeat",
+    "schema",
+    "zod",
+    "types"
+  ],
   "license": "MIT",
-  "author": "Waydock",
-  "homepage": "https://github.com/waydock/waydock-pulse#readme",
+  "author": { "name": "Waydock", "url": "https://waydock.ai" },
+  "homepage": "https://waydock.ai/docs/pulse",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/waydock/waydock-pulse.git",
+    "url": "git+https://github.com/waydock/pulse.git",
     "directory": "packages/core"
   },
-  "bugs": { "url": "https://github.com/waydock/waydock-pulse/issues" },
+  "bugs": { "url": "https://github.com/waydock/pulse/issues" },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
