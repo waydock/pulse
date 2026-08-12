@@ -12,6 +12,12 @@ name: Publish
 #   Repository:         pulse
 #   Workflow filename:  publish.yml
 # Configure it for BOTH @waydock/pulse and @waydock/pulse-core.
+#
+# Both triggers below bypass branch protection: a `v*` tag can point at any
+# commit, and workflow_dispatch does not go near `main` at all. Protecting the
+# branch therefore does nothing for the thing that actually reaches users. The
+# "Release tags" ruleset restricts creating, moving and deleting `v*` to
+# organization admins, which is what makes the tag trigger safe.
 
 on:
   push:
@@ -22,19 +28,30 @@ permissions:
   contents: read
   id-token: write   # required for npm OIDC trusted publishing
 
+# Actions are pinned to a commit SHA rather than a tag. A tag is a mutable
+# pointer: `actions/checkout@v5` is whatever the owner of that tag says it is on
+# the morning the job runs. That matters more here than in ci.yml, because this
+# job holds an OIDC token that can publish to npm. Dependabot opens the bumps,
+# see .github/dependabot.yml.
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
       # OIDC trusted publishing needs npm >= 11.5.1; runners ship 10.x.
-      - run: npm install -g npm@latest
+      #
+      # Pinned, not `npm@latest`. This step installs a package from the registry
+      # into the one job that can publish to that registry, minutes before it
+      # does. `latest` means a bad npm release is picked up by the next release
+      # here automatically. Dependabot cannot see a version inside a shell
+      # string, so bump this by hand.
+      - run: npm install -g npm@12.0.2
 
       - run: npm ci
 
@@ -53,11 +70,18 @@ jobs:
               echo "✓ $name@$version already published — skipping"
             else
               echo "→ publishing $name@$version"
-              # NOTE: --provenance is omitted because npm rejects provenance
-              # from a PRIVATE source repo (E422 "Only public source
-              # repositories are supported"). waydock/pulse is public now, so
-              # this can be re-added — do it on its own release, not alongside
-              # another change, so a provenance failure is unambiguous.
+              # No --provenance flag, and that is not an omission. Under
+              # trusted publishing npm generates and publishes the provenance
+              # attestation itself, by default; the flag is for token-based
+              # publishes. The earlier note here said the flag had been dropped
+              # because npm rejects provenance from a private source repo
+              # (E422) and should be re-added now that this repo is public.
+              # Adding it back would be a no-op at best. What the repo going
+              # public actually unblocked is the automatic attestation, which
+              # needs a public source repo for the same reason.
+              #
+              # So: no provenance until the Trusted Publisher is configured for
+              # both packages at npmjs.com, and provenance the moment it is.
               ( cd "$dir" && npm publish )
             fi
           done

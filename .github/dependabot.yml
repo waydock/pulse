@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs in .github/workflows, which is what makes
+  # publish.yml safe to hold an npm OIDC token. A SHA never updates on its own,
+  # so pinning without this file just means running last year's checkout
+  # forever. Dependabot rewrites the SHA and the trailing `# vX.Y.Z` comment
+  # together.
+  #
+  # It cannot see the npm version inside publish.yml's `npm install -g` shell
+  # string. That one is bumped by hand.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+
+  # One entry at the root covers both workspaces.
+  #
+  # Expect these to fail the release guard, and that is correct rather than
+  # friction to design away: a dependency range lives in the published
+  # package.json, so bumping one in packages/core or packages/agent changes
+  # what users install and is a release. Bump the package version in the same
+  # PR. The `no-release` label is the escape hatch when the bump is genuinely
+  # deferred to a later release PR, and it is deliberately not applied here
+  # automatically, because a security fix that merges without a version bump
+  # never reaches anyone and nothing reports a problem.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    labels:
+      - dependencies
+    groups:
+      # Dev dependencies cannot reach a user's install, so batch them into one
+      # PR instead of one per package.
+      dev-dependencies:
+        dependency-type: development
