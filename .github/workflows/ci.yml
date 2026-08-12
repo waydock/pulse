@@ -48,3 +48,48 @@ jobs:
       - run: npm run build
 
       - run: npm test
+
+  pack:
+    # vitest imports source directly, so it cannot see a packaging mistake:
+    # `files: ["dist"]` dropping something, the `bin` path going stale, or
+    # `getVersion()` failing to resolve `../package.json` from the installed
+    # layout. This installs what a user actually gets and runs it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Install from the tarballs and run the CLI
+        run: |
+          set -euo pipefail
+
+          core=$(cd packages/core && npm pack --silent)
+          agent=$(cd packages/agent && npm pack --silent)
+          expected=$(node -p "require('./packages/agent/package.json').version")
+
+          smoke=$(mktemp -d)
+          cd "$smoke"
+          npm init -y > /dev/null
+          # Both tarballs, so the local core satisfies the agent's dependency
+          # range instead of the published one being pulled in behind it.
+          npm install --no-audit --no-fund \
+            "$GITHUB_WORKSPACE/packages/core/$core" \
+            "$GITHUB_WORKSPACE/packages/agent/$agent"
+
+          # Invoked through .bin/pulse — the symlink a real install creates. The
+          # entrypoint check in cli.ts has to realpath that symlink to run at
+          # all, and nothing under vitest exercises it.
+          actual=$(./node_modules/.bin/pulse --version)
+          echo "pulse --version -> $actual (expected $expected)"
+          [ "$actual" = "$expected" ]
+
+          ./node_modules/.bin/pulse --help > /dev/null
+          echo "✓ CLI runs from a packed install"

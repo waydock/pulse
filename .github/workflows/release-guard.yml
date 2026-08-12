@@ -1,0 +1,96 @@
+name: Release guard
+
+# A pull request that changes shipped files has to bump the package version.
+#
+# This lives apart from ci.yml because it is the only check that reacts to
+# labels. Its escape hatch is the `no-release` label, so it needs the
+# `labeled`/`unlabeled` activity types on top of the defaults — and those fire
+# on every label change, on any label. Sharing a workflow with the build matrix
+# would mean relabelling a pull request cancels an in-flight build (the
+# concurrency group is per-ref) and then rebuilds both Node versions and the
+# pack smoke test, none of which can change based on a label.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  # Its own group, so a label change never cancels a CI run.
+  group: release-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    # publish.yml publishes a package only if its version is not already on the
+    # registry. Merge a change to shipped files without bumping and the next
+    # `vX.Y.Z` tag silently publishes nothing for that package — the release
+    # reports success, the fix never ships, and nothing reports a problem.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: A change to shipped files requires a version bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Read labels live rather than from github.event. "Re-run failed jobs"
+          # replays the original webhook payload, so a label added after the
+          # failure would still be invisible to an expression context.
+          LABELS=$(gh api "repos/${{ github.repository }}/issues/$PR/labels" --jq '.[].name' | tr '\n' ' ')
+          echo "Labels: ${LABELS:-(none)}"
+
+          if [[ " $LABELS " == *" no-release "* ]]; then
+            echo "Labelled no-release — bump deliberately deferred to a later release PR."
+            exit 0
+          fi
+
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo
+
+          fail=0
+          for pkg in agent core; do
+            dir="packages/$pkg"
+
+            # npm packs dist/ plus package.json, README and LICENSE. Tests and
+            # the vitest config never reach the tarball, so a test-only change
+            # is not a release.
+            shipped=$(printf '%s\n' "$CHANGED" \
+              | grep -E "^$dir/" \
+              | grep -vE '(\.test\.ts|/vitest\.config\.ts)$' || true)
+            if [ -z "$shipped" ]; then
+              echo "· $dir — nothing shipped changed"
+              continue
+            fi
+
+            git show "$BASE:$dir/package.json" > "/tmp/base-$pkg.json"
+            name=$(node -p "require('/tmp/base-$pkg.json').name")
+            old=$(node -p "require('/tmp/base-$pkg.json').version")
+            new=$(node -p "require('$PWD/$dir/package.json').version")
+
+            if [ "$old" = "$new" ]; then
+              echo "::error file=$dir/package.json::$name ships changed files but the version is still $old."
+              echo "  $name — changed: $(printf '%s ' $shipped)"
+              fail=1
+            else
+              echo "✓ $name $old -> $new"
+            fi
+          done
+
+          if [ "$fail" = 1 ]; then
+            echo
+            echo "Bump the version in the package above, or add the 'no-release' label"
+            echo "if the bump is intentionally deferred to a later release PR."
+            exit 1
+          fi
