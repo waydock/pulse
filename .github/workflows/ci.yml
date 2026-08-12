@@ -13,6 +13,10 @@ name: CI
 
 on:
   pull_request:
+    # `labeled`/`unlabeled` are on top of the defaults because the version job
+    # below treats `no-release` as its escape hatch. Without them, applying the
+    # label starts no run and the check stays red until someone pushes.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -48,3 +52,123 @@ jobs:
       - run: npm run build
 
       - run: npm test
+
+  pack:
+    # vitest imports source directly, so it cannot see a packaging mistake:
+    # `files: ["dist"]` dropping something, the `bin` path going stale, or
+    # `getVersion()` failing to resolve `../package.json` from the installed
+    # layout. This installs what a user actually gets and runs it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Install from the tarballs and run the CLI
+        run: |
+          set -euo pipefail
+
+          core=$(cd packages/core && npm pack --silent)
+          agent=$(cd packages/agent && npm pack --silent)
+          expected=$(node -p "require('./packages/agent/package.json').version")
+
+          smoke=$(mktemp -d)
+          cd "$smoke"
+          npm init -y > /dev/null
+          # Both tarballs, so the local core satisfies the agent's dependency
+          # range instead of the published one being pulled in behind it.
+          npm install --no-audit --no-fund \
+            "$GITHUB_WORKSPACE/packages/core/$core" \
+            "$GITHUB_WORKSPACE/packages/agent/$agent"
+
+          # Invoked through .bin/pulse — the symlink a real install creates. The
+          # entrypoint check in cli.ts has to realpath that symlink to run at
+          # all, and nothing under vitest exercises it.
+          actual=$(./node_modules/.bin/pulse --version)
+          echo "pulse --version -> $actual (expected $expected)"
+          [ "$actual" = "$expected" ]
+
+          ./node_modules/.bin/pulse --help > /dev/null
+          echo "✓ CLI runs from a packed install"
+
+  version:
+    # publish.yml publishes a package only if its version is not already on the
+    # registry. Merge a change to shipped files without bumping and the next
+    # `vX.Y.Z` tag silently publishes nothing for that package — the release
+    # reports success, the fix never ships, and nothing reports a problem.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: A change to shipped files requires a version bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Read labels live rather than from github.event. "Re-run failed jobs"
+          # replays the original webhook payload, so a label added after the
+          # failure would still be invisible to an expression context.
+          LABELS=$(gh api "repos/${{ github.repository }}/issues/$PR/labels" --jq '.[].name' | tr '\n' ' ')
+          echo "Labels: ${LABELS:-(none)}"
+
+          if [[ " $LABELS " == *" no-release "* ]]; then
+            echo "Labelled no-release — bump deliberately deferred to a later release PR."
+            exit 0
+          fi
+
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo
+
+          fail=0
+          for pkg in agent core; do
+            dir="packages/$pkg"
+
+            # npm packs dist/ plus package.json, README and LICENSE. Tests and
+            # the vitest config never reach the tarball, so a test-only change
+            # is not a release.
+            shipped=$(printf '%s\n' "$CHANGED" \
+              | grep -E "^$dir/" \
+              | grep -vE '(\.test\.ts|/vitest\.config\.ts)$' || true)
+            if [ -z "$shipped" ]; then
+              echo "· $dir — nothing shipped changed"
+              continue
+            fi
+
+            git show "$BASE:$dir/package.json" > "/tmp/base-$pkg.json"
+            name=$(node -p "require('/tmp/base-$pkg.json').name")
+            old=$(node -p "require('/tmp/base-$pkg.json').version")
+            new=$(node -p "require('$PWD/$dir/package.json').version")
+
+            if [ "$old" = "$new" ]; then
+              echo "::error file=$dir/package.json::$name ships changed files but the version is still $old."
+              echo "  $name — changed: $(printf '%s ' $shipped)"
+              fail=1
+            else
+              echo "✓ $name $old -> $new"
+            fi
+          done
+
+          if [ "$fail" = 1 ]; then
+            echo
+            echo "Bump the version in the package above, or add the 'no-release' label"
+            echo "if the bump is intentionally deferred to a later release PR."
+            exit 1
+          fi

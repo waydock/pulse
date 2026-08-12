@@ -2,5 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# npm pack output (the CI pack smoke test, run locally)
+*.tgz
+
 # local agent config (do not commit)
 pulse.config.yaml
