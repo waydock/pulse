@@ -9,7 +9,7 @@ name: Publish
 # Trusted Publisher):
 #   Publisher:          GitHub Actions
 #   Organization/user:  waydock
-#   Repository:         waydock-pulse
+#   Repository:         pulse
 #   Workflow filename:  publish.yml
 # Configure it for BOTH @waydock/pulse and @waydock/pulse-core.
 
@@ -53,10 +53,11 @@ jobs:
               echo "✓ $name@$version already published — skipping"
             else
               echo "→ publishing $name@$version"
-              # NOTE: --provenance is intentionally omitted — npm rejects
-              # provenance from a PRIVATE source repo (E422 "Only public source
-              # repositories are supported"). Re-add `--provenance` here if
-              # waydock/waydock-pulse is ever made public.
+              # NOTE: --provenance is omitted because npm rejects provenance
+              # from a PRIVATE source repo (E422 "Only public source
+              # repositories are supported"). waydock/pulse is public now, so
+              # this can be re-added — do it on its own release, not alongside
+              # another change, so a provenance failure is unambiguous.
               ( cd "$dir" && npm publish )
             fi
           done

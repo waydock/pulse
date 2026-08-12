@@ -1,7 +1,15 @@
+<img src="https://raw.githubusercontent.com/waydock/pulse/main/logo.svg" alt="Waydock" width="72" height="72">
+
 # @waydock/pulse
 
-Open-source watcher CLI. It runs checks against your processes, restarts them
-when they die, persists state across restarts, and sends heartbeats and alerts.
+Pulse answers one question about the things you run: is anything down, and when
+did it break? This CLI is the watcher that runs on your own machines. It
+evaluates health checks, restarts what has died, persists state across its own
+restarts, and posts a heartbeat on an independent timer, so a machine that goes
+quiet is itself the alert. Point it at
+[Waydock Pulse](https://waydock.ai/docs/pulse) and that heartbeat opens an
+incident, pages your channels, and feeds the status page; leave the heartbeat out
+and it still watches and restarts locally, alerting through your own webhook.
 
 ```bash
 npm install -g @waydock/pulse
@@ -121,4 +129,4 @@ restrict who can write to it. Credentials are stored at
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
