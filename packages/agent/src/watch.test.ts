@@ -143,3 +143,69 @@ describe('runCheckTick (integration)', () => {
     expect(ctx.statuses.get('recover-me')?.restarts).toBe(2)
   })
 })
+
+describe('runCheckTick — agents are checked concurrently', () => {
+  it('an agent stuck in restart backoff does not stop the others being checked', async () => {
+    // Previously this loop was serial, so an agent sitting in its restart
+    // backoff (seconds per attempt) left every agent after it in the list
+    // unchecked for the rest of the tick.
+    const config: any = {
+      node: 'n1', heartbeat: { url: 'x', key: 'k', interval: 60 },
+      defaults: { retries: 3, confirm: 1, interval: 60 },
+      agents: [
+        { name: 'slow', checks: [{ command: 'false' }], restart: 'true', retries: 3, confirm: 1 },
+        { name: 'fast', checks: [{ command: 'true' }], restart: false, retries: 1, confirm: 1 },
+      ],
+      metrics: {},
+    }
+    const ctx = { states: new Map(), statuses: new Map() }
+
+    let releaseSlow!: () => void
+    const slowRestart = new Promise<void>((r) => { releaseSlow = r })
+
+    const tick = runCheckTick(config, ctx, {
+      sendLocalAlert: async () => {},
+      attemptRestart: async () => {
+        await slowRestart // stands in for the backoff sleeps
+        return { outcome: 'failed' as const, attempts: 3 }
+      },
+      writeState: async () => {},
+      statePath: '/tmp/pulse-test-state-parallel.json',
+      now: () => 1000,
+    })
+
+    // While 'slow' is still restarting, 'fast' has already been evaluated.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ctx.statuses.get('fast')?.status).toBe('up')
+
+    releaseSlow()
+    await tick
+    expect(ctx.statuses.get('slow')?.status).toBe('down')
+  })
+})
+
+describe('startWatch — unknown status', () => {
+  it('reports an unchecked agent as down rather than up', async () => {
+    // A monitor must not fail open: a spurious down is visible noise, a
+    // spurious up is silence that looks exactly like health.
+    const recv = await fakeReceiver()
+    const config: any = {
+      node: 'n1', heartbeat: { url: recv.url, key: 'k', interval: 60 },
+      defaults: { retries: 1, confirm: 1, interval: 60 },
+      agents: [{ name: 'never-checked', checks: [{ command: 'true' }], restart: false, retries: 1, confirm: 1 }],
+      metrics: { cpu: false, mem: false, disk: false },
+    }
+
+    const stop = await startWatch(config, {
+      statePath: '/tmp/pulse-test-state-unknown.json',
+      readState: async () => ({}),
+      setIntervalFn: () => 1 as any,
+      clearIntervalFn: () => {},
+    })
+    stop()
+
+    // The priming check ran to completion, so this beat reports observed state.
+    expect(recv.beats[0].agents[0]).toMatchObject({ name: 'never-checked', status: 'up' })
+    recv.close()
+  })
+})

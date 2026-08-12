@@ -1,0 +1,50 @@
+name: CI
+
+# Build, typecheck and test every pull request and every push to main.
+#
+# Until this existed the only workflow was publish.yml, which triggers on a
+# `v*` tag. That meant the first thing to run the test suite on a change was
+# the release itself, on a package already published to npm.
+#
+# Node 20 is the floor declared in every package's `engines`; 22 is what
+# publish.yml releases on. Testing both means a change that quietly needs a
+# newer runtime than the package claims to support fails here rather than in
+# a user's install.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push supersedes an in-flight run for the same ref.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # report both versions, not just the first to break
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      # `tsc -b` builds in dependency order, so the agent compiles against a
+      # freshly built pulse-core rather than whatever happens to be in
+      # node_modules. It is also the typecheck: the repo's `typecheck` script
+      # is the same command, so running both would just repeat the work.
+      - run: npm run build
+
+      - run: npm test

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { AgentState } from './state-machine.js'
 import { evaluateAgent } from './checks.js'
 import { startHeartbeatLoop, buildHeartbeat, sendHeartbeat, defaultMetrics } from './heartbeat.js'
+import { nonOverlapping } from './loop.js'
 import type { AlertEvent } from './webhook.js'
 import type { RestartOutcome } from './restart.js'
 import type { ResolvedConfig } from './config-loader.js'
@@ -55,7 +56,13 @@ export async function runCheckTick(
 ): Promise<void> {
   const webhookUrl = config.webhook?.url
 
-  for (const agent of config.agents) {
+  // Agents are checked concurrently, not one after another. They are independent
+  // services, and the restart path sleeps `n * baseBackoff` per attempt — serially
+  // that meant an agent stuck in its backoff left every agent after it in the list
+  // unchecked for the rest of the tick, which is a blind spot in the one tool that
+  // is supposed to be watching. Each agent only ever touches its own key in
+  // ctx.states / ctx.statuses, so there is nothing to contend over.
+  await Promise.all(config.agents.map(async (agent) => {
     // Lazily create state machine for this agent
     if (!ctx.states.has(agent.name)) {
       ctx.states.set(agent.name, new AgentState(agent.confirm))
@@ -104,7 +111,7 @@ export async function runCheckTick(
       status: state.status === 'restarting' ? 'down' : state.status,
       restarts: currentRestarts + restartAttempts,
     })
-  }
+  }))
 
   // Persist statuses to state file
   const stateObj: Record<string, string> = {}
@@ -128,6 +135,8 @@ export interface StartWatchDeps {
   readState?: (path: string) => Promise<Record<string, string>>
   /** Called after every heartbeat with the delivery result + live up/down counts. */
   onHeartbeat?: (info: { ok: boolean; up: number; down: number }) => void
+  /** Called when a check firing is dropped because the previous one is still running. */
+  onCheckSkipped?: () => void
 }
 
 /**
@@ -201,10 +210,13 @@ export async function startWatch(config: ResolvedConfig, deps: StartWatchDeps = 
   const setFn = deps.setIntervalFn ?? setInterval
   const clearFn = deps.clearIntervalFn ?? clearInterval
 
-  const runCheck = () =>
-    runCheckTick(config, ctx, checkTickDeps).catch(() => {
-      /* swallow — check loop must never crash the process */
-    })
+  // Guarded so a tick that runs long (restart backoff is seconds per attempt)
+  // cannot have the next firing start on top of it. Two concurrent ticks would
+  // both see the same agent down and both run its restart command.
+  const runCheck = nonOverlapping(
+    () => runCheckTick(config, ctx, checkTickDeps),
+    { onSkip: deps.onCheckSkipped },
+  )
 
   const heartbeatTick = async (): Promise<void> => {
     const agentStatuses = (): AgentStatus[] =>
@@ -212,7 +224,13 @@ export async function startWatch(config: ResolvedConfig, deps: StartWatchDeps = 
         const info = ctx.statuses.get(a.name)
         return {
           name: a.name,
-          status: info?.status ?? 'up',
+          // Unknown reports as down, not up. The wire schema has no third state,
+          // so one of the two has to stand in for "no check has landed yet", and
+          // a monitor must not fail open: a spurious down is noise the operator
+          // can see and dismiss, whereas a spurious up is silence that looks
+          // exactly like health. Reached only if the first check tick failed,
+          // since startWatch runs one to completion before the first beat.
+          status: info?.status ?? 'down',
           restarts: info?.restarts ?? 0,
         }
       })
@@ -236,7 +254,12 @@ export async function startWatch(config: ResolvedConfig, deps: StartWatchDeps = 
   // Run one check + heartbeat immediately so a down agent is caught (and the
   // first beat sent) without waiting a full interval. `setInterval` only fires
   // after the first interval has elapsed.
-  await runCheck()
+  //
+  // The priming check calls runCheckTick directly rather than going through the
+  // guarded wrapper: the wrapper is fire-and-forget by design, and this one must
+  // finish before the first beat so that beat reports observed state instead of
+  // the fail-closed default.
+  await runCheckTick(config, ctx, checkTickDeps).catch(() => { /* swallow — must never crash */ })
   await heartbeatTick().catch(() => { /* swallow — heartbeat must never crash */ })
 
   // --- Check/restart loop ---
