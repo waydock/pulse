@@ -1,6 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    // Without this, tsc defaults to including lib.dom.d.ts, which has no
+    // business being in scope for a Node-only CLI. It also breaks the timers:
+    // DOM types `setInterval` as returning `number` and Node types it as
+    // returning `Timeout`, so `ReturnType<typeof setInterval>` collapses to
+    // `number | Timeout` while `clearInterval` accepts only the Node handle.
+    // That mismatch was latent until @types/node 26 rearranged its globals.
+    "lib": ["ES2022"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
