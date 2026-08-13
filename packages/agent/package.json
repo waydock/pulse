@@ -1,6 +1,6 @@
 {
   "name": "@waydock/pulse",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Watch what you run: health checks, automatic restarts, and heartbeats to Waydock Pulse. One YAML file, installs as a background service on macOS and Linux.",
   "keywords": [
     "waydock",
