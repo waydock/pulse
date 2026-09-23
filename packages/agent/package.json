@@ -33,7 +33,7 @@
   "dependencies": {
     "@waydock/pulse-core": "^0.2.0",
     "js-yaml": "^5.2.3",
-    "systeminformation": "^5.33.1"
+    "systeminformation": "^5.33.13"
   },
   "devDependencies": { "@types/node": "^26.2.0" },
   "publishConfig": { "access": "public" }
