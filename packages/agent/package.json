@@ -35,6 +35,6 @@
     "js-yaml": "^5.2.3",
     "systeminformation": "^5.33.1"
   },
-  "devDependencies": { "@types/node": "^26.4.1" },
+  "devDependencies": { "@types/node": "^26.2.0" },
   "publishConfig": { "access": "public" }
 }
